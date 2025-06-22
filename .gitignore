@@ -1,0 +1,45 @@
+# 这是一个为 Estia-AI 助手项目量身定制的 .gitignore 文件
+
+# 忽略所有 Python 缓存文件
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# 忽略 Conda 和 venv 虚拟环境
+# 特别是 Oobabooga 的专属环境
+installer_files/env/
+
+
+# 忽略我们存放AI大脑的独立服务器文件夹
+# 假设它和你的 estia 项目文件夹在同一个父目录下
+# 如果不在，可以忽略这一行，或者修改路径
+llama/
+
+# 忽略 Oobabooga 存放用户数据和模型的文件夹（以防万一）
+text-generation-webui/user_data/models/
+text-generation-webui/user_data/logs/
+text-generation-webui/logs/
+
+# 忽略我们自己的项目生成的数据
+# 比如录音和AI生成的语音
+assets/audio/
+# 比如未来生成的日记或文档
+assets/documents/
+# 我们规划的日志文件夹
+logs/
+
+# 忽略编辑器和操作系统的配置文件
+.vscode/
+.idea/
+.DS_Store
+
+# 忽略任何可能的敏感信息文件（非常重要！）
+# 建议未来把API Key等信息写在 secrets.py 中，并把这个文件加入忽略列表
+config/secrets.py
+
+# 忽略临时的依赖文件
+temp_requirements.txt
+
+# 忽略我们下载的 .whl 安装包
+*.whl
