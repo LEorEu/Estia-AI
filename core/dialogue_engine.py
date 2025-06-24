@@ -19,7 +19,28 @@ from config import settings     # 从我们的配置文件中导入 settings。
 # 功能函数定义
 # -----------------------------------------------------------------------------
 
-def get_llm_response(user_prompt: str, chat_history: list, personality: str) -> str:
+def get_llm_response(user_prompt: str, chat_history: list, retrieved_memories: list, personality: str) -> str:
+
+    # 格式化检索到的长期记忆，作为“背景资料”提供给LLM
+    context_header = "--- 以下是你可能会用到的、从你的长期记忆中提取的相关信息，请参考这些信息来更好地回答当前问题 ---"
+    formatted_memories = "\n".join([f"- [历史对话于 {mem['timestamp']}] {mem['role']}: {mem['content']}" for mem in retrieved_memories])
+
+    # 只有在找到了相关记忆时，才构建这段背景资料
+    if retrieved_memories:
+        memory_context = f"{context_header}\n{formatted_memories}\n--- 背景资料结束 ---"
+    else:
+        memory_context = ""
+
+    # 构建最终的消息列表
+    messages = [{"role": "system", "content": personality}]
+
+    # 如果有背景资料，就作为一条额外的系统信息插入
+    if memory_context:
+        messages.append({"role": "system", "name": "memory", "content": memory_context})
+
+    messages.extend(chat_history)
+    messages.append({"role": "user", "content": user_prompt})
+    
     """
     向本地的 llama.cpp 服务器 (OpenAI 兼容 API) 发送请求并获取回复。
 
