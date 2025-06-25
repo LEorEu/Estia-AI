@@ -1,7 +1,7 @@
 # core/dialogue_engine.py
 
 """
-本模块是 AI 的“思考”核心。（V2.0 - OpenAI API 兼容版）
+本模块是 AI 的"思考"核心。（V2.0 - OpenAI API 兼容版）
 它负责接收用户的文本输入，将其打包成 OpenAI 兼容的格式，
 发送给本地运行的、轻量级的 llama.cpp 服务器，并解析返回的回复。
 """
@@ -13,97 +13,186 @@
 import requests                 # 导入 requests 库，用于发送 HTTP API 请求。
 import json                     # 导入 json 库，用于处理 JSON 数据格式。
 from config import settings     # 从我们的配置文件中导入 settings。
+import time                     # 导入 time 库，用于格式化时间戳。
+import os
+import openai
 
 
 # -----------------------------------------------------------------------------
 # 功能函数定义
 # -----------------------------------------------------------------------------
 
-def get_llm_response(user_prompt: str, chat_history: list, retrieved_memories: list, personality: str) -> str:
-
-    # 格式化检索到的长期记忆，作为“背景资料”提供给LLM
-    context_header = "--- 以下是你可能会用到的、从你的长期记忆中提取的相关信息，请参考这些信息来更好地回答当前问题 ---"
-    formatted_memories = "\n".join([f"- [历史对话于 {mem['timestamp']}] {mem['role']}: {mem['content']}" for mem in retrieved_memories])
-
-    # 只有在找到了相关记忆时，才构建这段背景资料
-    if retrieved_memories:
-        memory_context = f"{context_header}\n{formatted_memories}\n--- 背景资料结束 ---"
-    else:
-        memory_context = ""
-
-    # 构建最终的消息列表
-    messages = [{"role": "system", "content": personality}]
-
-    # 如果有背景资料，就作为一条额外的系统信息插入
-    if memory_context:
-        messages.append({"role": "system", "name": "memory", "content": memory_context})
-
-    messages.extend(chat_history)
-    messages.append({"role": "user", "content": user_prompt})
+def get_llm_response(prompt, history=None, personality=""):
+    """
+    使用大语言模型生成回复
     
-    """
-    向本地的 llama.cpp 服务器 (OpenAI 兼容 API) 发送请求并获取回复。
-
     参数:
-        user_prompt (str): 从语音识别模块传来的、用户的提问文本。
-        personality (str): AI 的系统级人格设定，可以动态传入。
-
+        prompt: 提示文本
+        history: 历史对话 (可选)
+        personality: 人格设定 (可选)
+    
     返回:
-        str: LLM 生成的回复文本。如果出错则返回一条错误信息。
+        模型生成的回复
     """
-    # 打印提示，表示“大脑”正在思考
-    print("🧠 LLM 正在思考中...")
-
-    # --- API 请求的头部信息 ---
-    # 指定我们发送的数据是 JSON 格式
-    headers = {
-        "Content-Type": "application/json"
-    }
-
-    # 先构建一个包含系统人格设定的基础消息列表
-    messages = [
-        {"role": "system", "content": personality}
-    ]
-    # 使用 .extend() 方法，把“记忆笔记本”（chat_history）里的所有历史对话都加进来
-    messages.extend(chat_history)
-
-    # 最后，再把用户这一轮的新问题加到末尾
-    messages.append({"role": "user", "content": user_prompt})
-
-    # 构建符合 OpenAI API 格式的“载荷”(payload)
-    payload = {
-        "model": "Mistral-Small-3.1-24B-Instruct-2503-Q4_K_M.gguf",  # 这里的模型名可以随便写，因为服务器只加载了一个模型。
-        "messages": messages, # <- 使用我们构建的、包含历史的完整消息列表
-        "temperature": settings.LLM_TEMPERATURE,    # 从配置文件读取“温度”参数
-        "max_tokens": settings.LLM_MAX_NEW_TOKENS   # 从配置文件读取“最大生成长度”参数
-    }
-
+    if history is None:
+        history = []
+    
+    # 构建消息数组
+    messages = []
+    
+    # 添加人格设定 (如果有)
+    if personality:
+        messages.append({
+            "role": "system",
+            "content": personality
+        })
+    
+    # 添加历史对话
+    for entry in history:
+        messages.append({
+            "role": entry.get("role", "user"),
+            "content": entry.get("content", "")
+        })
+    
+    # 添加当前提示
+    messages.append({
+        "role": "user",
+        "content": prompt
+    })
+    
+    # 请求LLM
     try:
-        # 使用 requests.post() 方法向我们新的 API URL 发送请求
-        # 注意：URL 是从 settings 文件中读取的，请确保你已经把它改成了 http://127.0.0.1:8080/v1/chat/completions
-        response = requests.post(settings.LLM_API_URL, headers=headers, json=payload)
-
-        # 检查服务器的返回状态码，200 代表成功
-        if response.status_code == 200:
-            # 解析返回的 JSON 数据
-            result = response.json()
+        # 加载API设置
+        openai.api_key = settings.OPENAI_API_KEY
+        
+        # 配置超时
+        timeout = 60  # 60秒超时
+        
+        # 调用API
+        if settings.MODEL_PROVIDER.lower() == "azure":
+            openai.api_type = "azure"
+            openai.api_base = settings.AZURE_ENDPOINT
+            openai.api_version = settings.AZURE_API_VERSION
             
-            # --- 解析 OpenAI 格式的回复 ---
-            # 提取出我们需要的、由AI生成的文本
-            # 新的格式下，回复文本在 'choices' 列表的第一个元素的 'message' 字典的 'content' 键中
-            ai_response = result['choices'][0]['message']['content']
-
-            # 打印 AI 的原始回复，方便调试
-            print(f"🤖 AI 原始回复: {ai_response}")
-            
-            # 返回最终的回复文本
-            return ai_response
+            response = openai.ChatCompletion.create(
+                engine=settings.LLM_MODEL,
+                messages=messages,
+                temperature=0.7,
+                max_tokens=2000,
+                timeout=timeout
+            )
         else:
-            # 如果服务器返回了错误状态码，打印详细错误信息
-            print(f"❌ LLM API 返回错误，状态码: {response.status_code}, 内容: {response.text}")
-            return "抱歉，我的大脑好像出了一点小问题。"
+            # 使用OpenAI API
+            response = openai.ChatCompletion.create(
+                model=settings.LLM_MODEL,
+                messages=messages,
+                temperature=0.7,
+                max_tokens=2000,
+                timeout=timeout
+            )
+        
+        # 提取回复文本
+        reply = response.choices[0].message.content.strip()
+        return reply
+        
+    except Exception as e:
+        print(f"LLM调用失败: {e}")
+        return "抱歉，我现在无法完成这个请求。"
 
-    except requests.exceptions.RequestException as e:
-        # 如果在发送请求时发生了网络错误（例如 llama.cpp 服务器没打开）
-        print(f"❌ 无法连接到 LLM API: {e}")
-        return "抱歉，我暂时无法连接到我的大脑，请检查服务是否已启动。"
+def generate_response(user_query, memory_context, personality=""):
+    """
+    生成回复，考虑记忆上下文和人格
+    
+    参数:
+        user_query: 用户查询
+        memory_context: 相关记忆上下文
+        personality: 人格设定
+    
+    返回:
+        生成的回复
+    """
+    # 构建完整提示
+    full_prompt = f"""请基于以下信息回答用户的问题或请求。
+
+{memory_context if memory_context else "没有找到相关记忆。"}
+
+用户请求: {user_query}
+
+请注意:
+1. 如果记忆中包含矛盾信息，请优先考虑标记为最新的信息
+2. 回答时考虑关联记忆提供的额外上下文
+3. 如果看到记忆摘要，可以利用其提供的整合信息
+4. 保持简洁自然的对话风格
+
+请基于上述信息给出回复:"""
+
+    # 调用LLM生成回复
+    response = get_llm_response(full_prompt, [], personality)
+    return response
+
+def retrieve_memories(query, limit=5, memory_manager=None):
+    """
+    从记忆管理器中检索相关记忆
+    
+    参数:
+        query: 查询文本
+        limit: 最大返回数量
+        memory_manager: 记忆管理器实例
+    
+    返回:
+        格式化的记忆文本
+    """
+    if not memory_manager:
+        return "没有可用的记忆。"
+    
+    try:
+        # 从记忆管理器检索记忆
+        results = memory_manager.retrieve_memory(
+            query, 
+            limit=limit,
+            parallel=True,
+            include_associations=True,
+            check_conflicts=True
+        )
+        
+        if not results:
+            return "没有找到相关记忆。"
+        
+        # 格式化记忆
+        formatted_memories = []
+        
+        for memory in results:
+            role = memory.get("role", "system")
+            content = memory.get("content", "")
+            timestamp = memory.get("timestamp", "")
+            
+            # 格式化时间
+            if isinstance(timestamp, (int, float)):
+                import datetime
+                timestamp = datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M')
+            
+            # 处理特殊标记
+            prefix = ""
+            if memory.get("is_associated", False):
+                prefix = "[关联记忆] "
+            elif memory.get("is_summary", False):
+                prefix = "[记忆摘要] "
+            elif memory.get("status") == "superseded":
+                prefix = "[已更新的信息] "
+            
+            # 添加上下文信息
+            context = ""
+            if "context" in memory:
+                context = f" (备注: {memory['context']})"
+            
+            formatted_memories.append(f"{prefix}[{timestamp}] {role}: {content}{context}")
+        
+        # 添加一个简短的介绍
+        header = "系统记忆:"
+        formatted_text = header + "\n" + "\n".join(formatted_memories)
+        
+        return formatted_text
+        
+    except Exception as e:
+        print(f"记忆检索失败: {e}")
+        return "记忆检索过程中出现错误。"
