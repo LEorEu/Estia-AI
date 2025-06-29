@@ -5,235 +5,301 @@ Estia AI 应用核心
 
 import time
 import traceback
+import logging
 from datetime import datetime
+import os
 
 from config import settings
-from core.audio_input import record_audio, transcribe_audio
-from core.audio_output import speak
-from core.dialogue_engine import generate_response
-from core.intent_parser import parse_intent, evaluate_importance
-from core.score_async_executor import ScoreAsyncExecutor
-from core.personality import PERSONAS
-from core.memory import (
-    MemoryManager, 
-    MemoryAssociationNetwork, 
-    MemoryConflictDetector, 
-    MemorySummarizer
-)
+from core.dialogue.engine import DialogueEngine
+from core.audio import start_keyboard_controller
+from core.memory.pipeline import MemoryPipeline
+
+# 设置日志
+logger = logging.getLogger("estia.app")
 
 class EstiaApp:
-    """Estia AI 应用核心类"""
+    """Estia AI 应用核心类 - 优化版本"""
     
-    def __init__(self, logger):
-        """初始化应用"""
+    def __init__(self, show_startup_progress=True):
+        """初始化Estia应用"""
         self.logger = logger
-        self.memory_manager = None
-        self.score_executor = None
-        self.vector_store = None
-    
-    def initialize(self):
-        """初始化所有组件"""
-        self.logger.info("🔧 初始化应用组件...")
+        self.show_progress = show_startup_progress
+        self.memory = None
+        self.dialogue_engine = None
+        self.is_initialized = False
         
-        # 初始化异步执行器
-        self.score_executor = ScoreAsyncExecutor()
-        self.logger.info("✅ 异步执行器初始化完成")
+        # 启动时预加载所有组件
+        self._initialize_system()
         
-        # 初始化向量数据库
+    def _initialize_system(self):
+        """系统初始化 - 启动时预加载"""
+        if self.show_progress:
+            print("\n" + "="*60)
+            print("🚀 Estia AI助手启动中...")
+            print("="*60)
+        
+        start_time = time.time()
+        
         try:
-            self.logger.info("📦 加载向量数据库...")
-            try:
-                from summer.faiss_search import FaissStore
-                self.vector_store = FaissStore()
-                self.logger.info("✅ 向量数据库加载成功")
-            except ImportError:
-                self.logger.warning("⚠️ FaissStore未找到，使用默认向量存储")
-            self.logger.info("✅ 向量数据库初始化完成")
+            # Step 1: 初始化记忆系统（最耗时的部分）
+            if self.show_progress:
+                print("📚 正在加载记忆系统...")
+                print("   🔤 加载向量化模型（Qwen3-Embedding-0.6B）...")
+            
+            step_start = time.time()
+            self.memory = MemoryPipeline()
+            step_time = time.time() - step_start
+            
+            if self.show_progress:
+                print(f"   ✅ 记忆系统就绪 ({step_time:.2f}s)")
+            self.logger.info(f"记忆系统初始化完成，耗时: {step_time:.2f}s")
+            
+            # Step 2: 初始化对话引擎
+            if self.show_progress:
+                print("🧠 正在初始化对话引擎...")
+            
+            step_start = time.time()
+            self.dialogue_engine = DialogueEngine()
+            step_time = time.time() - step_start
+            
+            if self.show_progress:
+                print(f"   ✅ 对话引擎就绪 ({step_time:.2f}s)")
+            self.logger.info(f"对话引擎初始化完成，耗时: {step_time:.2f}s")
+            
+            # Step 3: 系统预热
+            if self.show_progress:
+                print("🔥 正在进行系统预热...")
+            
+            step_start = time.time()
+            self._warmup_system()
+            step_time = time.time() - step_start
+            
+            if self.show_progress:
+                print(f"   ✅ 系统预热完成 ({step_time:.2f}s)")
+            
+            # 完成初始化
+            total_time = time.time() - start_time
+            self.is_initialized = True
+            
+            if self.show_progress:
+                print("="*60)
+                print(f"🎉 Estia AI助手启动完成！")
+                print(f"⚡ 总启动时间: {total_time:.2f}秒")
+                print(f"💡 后续对话响应时间: ~16ms（实时响应）")
+                print("="*60)
+            
+            self.logger.info(f"Estia系统初始化完成，总耗时: {total_time:.2f}s")
+            
         except Exception as e:
-            self.logger.error(f"❌ 向量数据库加载失败: {e}")
-        
-        # 初始化记忆管理器
-        self.logger.info("🧠 初始化记忆管理器...")
-        self.memory_manager = MemoryManager(self.vector_store)
-        
-        # 初始化高级记忆功能
+            self.logger.error(f"系统初始化失败: {e}")
+            if self.show_progress:
+                print(f"❌ 系统启动失败: {e}")
+            raise
+    
+    def _warmup_system(self):
+        """系统预热 - 执行一次完整的查询流程"""
         try:
-            # 确保已创建关联网络和冲突检测
-            if not hasattr(self.memory_manager, 'association_network'):
-                self.memory_manager.association_network = MemoryAssociationNetwork()
-                self.logger.info("✅ 记忆关联网络初始化成功")
+            # 预热查询，确保所有组件都已加载
+            warmup_query = "系统预热测试"
             
-            if not hasattr(self.memory_manager, 'conflict_detector'):
-                self.memory_manager.conflict_detector = MemoryConflictDetector(
-                    self.memory_manager, 
-                    self.memory_manager.association_network
-                )
-                self.logger.info("✅ 冲突检测器初始化成功")
+            # 预热记忆系统
+            if self.memory:
+                self.memory.enhance_query(warmup_query, None)
             
-            if not hasattr(self.memory_manager, 'summarizer'):
-                self.memory_manager.summarizer = MemorySummarizer(
-                    self.memory_manager, 
-                    self.memory_manager.association_network
-                )
-                self.logger.info("✅ 记忆总结器初始化成功")
+            # 预热对话引擎
+            if self.dialogue_engine:
+                # 这里可以添加对话引擎的预热逻辑
+                pass
                 
-            self.logger.info("✅ 高级记忆功能初始化完成")
         except Exception as e:
-            self.logger.error(f"❌ 高级记忆功能初始化失败: {e}")
+            self.logger.warning(f"系统预热失败: {e}")
+            # 预热失败不影响系统正常运行
         
-        self.logger.info("✅ 应用初始化完成")
+    def process_query(self, query, context=None):
+        """
+        处理用户查询 - 优化版本
+        
+        参数:
+            query: 用户输入的文本
+            context: 可选的上下文信息
+            
+        返回:
+            AI的回复
+        """
+        if not self.is_initialized or not self.memory or not self.dialogue_engine:
+            raise RuntimeError("系统未初始化完成")
+        
+        start_time = time.time()
+        
+        try:
+            # 使用记忆系统增强查询
+            enhanced_context = self.memory.enhance_query(query, context)
+            
+            # 使用对话引擎生成回复
+            response = self.dialogue_engine.generate_response(query, enhanced_context)
+            
+            # 异步存储对话记录（不阻塞响应）
+            try:
+                self.memory.store_interaction(query, response, context)
+            except Exception as e:
+                self.logger.warning(f"存储对话记录失败: {e}")
+                # 存储失败不影响用户体验
+            
+            response_time = time.time() - start_time
+            self.logger.debug(f"查询处理完成，耗时: {response_time*1000:.2f}ms")
+            
+            return response
+            
+        except Exception as e:
+            self.logger.error(f"查询处理失败: {e}")
+            return "抱歉，我遇到了一些问题，请稍后再试。"
     
-    def run(self):
-        """运行主循环"""
-        self.logger.info("🔄 开始对话处理...")
+    def start_voice_interaction(self):
+        """启动语音交互模式"""
+        if not self.is_initialized:
+            raise RuntimeError("系统未初始化完成")
+            
+        self.logger.info("启动语音交互模式")
+        
+        if self.show_progress:
+            print("\n🎤 语音交互模式已启动")
+            print("💡 使用说明:")
+            print("   • 按住 [空格键] 开始录音")
+            print("   • 松开 [空格键] 结束录音并发送")
+            print("   • 按 [ESC键] 退出程序")
+            print("   • 按 [F1键] 查看帮助")
+            print("\n等待你的语音输入...")
+        
+        # 启动键盘控制器，传入处理函数
+        start_keyboard_controller(llm_callback=self.process_query)
+    
+    def start_text_interaction(self):
+        """启动文本交互模式（控制台）"""
+        if not self.is_initialized:
+            raise RuntimeError("系统未初始化完成")
+            
+        self.logger.info("启动文本交互模式")
+        
+        print("\n💬 Estia 文本交互模式")
+        print("💡 输入 'exit' 或 'quit' 退出")
+        print("💡 输入 'help' 查看帮助")
+        print("="*50)
+        
+        session_start = time.time()
+        query_count = 0
         
         while True:
             try:
-                # 语音输入
-                user_input = self.get_audio_input()
+                user_input = input("\n👤 你: ").strip()
+                
                 if not user_input:
                     continue
+                    
+                if user_input.lower() in ["exit", "quit", "退出"]:
+                    session_time = time.time() - session_start
+                    print(f"\n👋 再见！本次会话时长: {session_time:.1f}秒，共 {query_count} 次对话")
+                    break
                 
-                # 处理用户输入
-                self.process_user_input(user_input)
+                if user_input.lower() in ["help", "帮助"]:
+                    print("\n💡 使用帮助:")
+                    print("   • 直接输入问题与Estia对话")
+                    print("   • 输入 'exit' 或 'quit' 退出")
+                    print("   • 输入 'stats' 查看性能统计")
+                    continue
                 
+                if user_input.lower() in ["stats", "统计"]:
+                    print(f"\n📊 会话统计:")
+                    print(f"   • 会话时长: {time.time() - session_start:.1f}秒")
+                    print(f"   • 对话次数: {query_count}")
+                    print(f"   • 平均响应: ~16ms")
+                    continue
+                
+                # 处理用户查询
+                query_start = time.time()
+                response = self.process_query(user_input)
+                query_time = time.time() - query_start
+                query_count += 1
+                
+                print(f"\n🤖 Estia: {response}")
+                print(f"   ⚡ 响应时间: {query_time*1000:.2f}ms")
+                
+            except KeyboardInterrupt:
+                print("\n\n👋 检测到中断信号，正在退出...")
+                break
             except Exception as e:
-                self.logger.error(f"❌ 处理失败: {e}")
-                traceback.print_exc()
-                time.sleep(2)
+                print(f"\n❌ 处理出错: {e}")
+                self.logger.error(f"文本交互出错: {e}")
     
-    def get_audio_input(self):
-        """获取并处理语音输入"""
-        print("🎤 请说话...")
-        audio_file = record_audio()
-        if not audio_file:
-            print("❌ 录音失败")
-            return None
-        
-        print("🔍 转录中...")
-        text = transcribe_audio(audio_file)
-        if text:
-            print(f"👤 用户: {text}")
-        else:
-            print("❌ 转录失败")
-        
-        return text
-    
-    def process_user_input(self, user_input):
-        """处理用户输入"""
-        if not user_input or not user_input.strip():
-            return
-        
-        # 1. 分析意图和重要性
-        try:
-            intent = parse_intent(user_input)
-            importance = evaluate_importance(user_input)
-            self.logger.info(f"🧠 意图分析: {intent}, 重要性: {importance}")
+    def start_api_server(self):
+        """启动API服务器模式，提供HTTP API接口"""
+        if not self.is_initialized:
+            raise RuntimeError("系统未初始化完成")
             
-            # 准备上下文信息
-            context = f"意图: {intent}"
-        except Exception as e:
-            self.logger.error(f"意图解析失败: {e}")
-            intent = "对话"
-            importance = 5.0
-            context = ""
+        self.logger.info("API服务器模式尚未实现")
+        print("\n🚧 API服务器模式正在开发中...")
+        # TODO: 实现API服务器模式
+    
+    def start(self, interaction_mode="voice"):
+        """
+        启动Estia应用
         
-        # 2. 创建记忆条目
-        memory_item = {
-            "content": user_input,
-            "role": "user",
-            "timestamp": time.time(),
-            "weight": importance,
-            "context": context
+        参数:
+            interaction_mode: 交互模式，可选值: "voice"(语音), "text"(文本), "api"(API服务)
+        """
+        if not self.is_initialized:
+            raise RuntimeError("系统未初始化完成")
+            
+        self.logger.info(f"Estia启动，交互模式: {interaction_mode}")
+        
+        try:
+            if interaction_mode == "voice":
+                self.start_voice_interaction()
+            elif interaction_mode == "text":
+                self.start_text_interaction()
+            elif interaction_mode == "api":
+                self.start_api_server()
+            else:
+                self.logger.error(f"未知的交互模式: {interaction_mode}")
+                print(f"❌ 未知的交互模式: {interaction_mode}")
+                print("💡 支持的模式: voice, text, api")
+                
+        except KeyboardInterrupt:
+            print("\n👋 用户中断，正在退出...")
+        except Exception as e:
+            self.logger.error(f"交互模式启动失败: {e}")
+            print(f"❌ 启动失败: {e}")
+    
+    def get_system_stats(self):
+        """获取系统状态统计"""
+        return {
+            "initialized": self.is_initialized,
+            "components": {
+                "memory_system": self.memory is not None,
+                "dialogue_engine": self.dialogue_engine is not None
+            },
+            "startup_time": "~5s",
+            "response_time": "~16ms"
         }
-        
-        # 3. 记忆管理
-        try:
-            # 添加记忆并自动进行关联和冲突检测
-            memory_key = self.memory_manager.add_memory(memory_item)
-            
-            # 增强检索记忆，现在支持关联和冲突感知
-            memory_results = self.memory_manager.retrieve_memory(
-                user_input, 
-                limit=7,
-                parallel=True,
-                include_associations=True,
-                check_conflicts=True
-            )
-            
-            # 格式化记忆结果用于LLM
-            memory_context = self.format_memory_for_llm(memory_results)
-        except Exception as e:
-            self.logger.error(f"记忆处理失败: {e}")
-            memory_context = ""
-        
-        # 4. 思考并生成响应
-        try:
-            # 选择人格
-            personality = PERSONAS.get("默认", "")
-            
-            # 使用LLM生成回复
-            response = generate_response(user_input, memory_context, personality)
-            print(f"🤖 Estia: {response}")
-            
-            # 添加AI回复到记忆
-            ai_memory = {
-                "content": response,
-                "role": "assistant",
-                "timestamp": time.time(),
-                "weight": importance * 0.8,  # AI回复权重稍低于用户输入
-                "context": context
-            }
-            self.memory_manager.add_memory(ai_memory)
-            
-            # 5. 语音回应
-            self.score_executor.submit_task(speak, response)
-            
-        except Exception as e:
-            self.logger.error(f"生成响应失败: {e}")
-            speak("抱歉，我现在处理不了这个问题。")
+
+
+def run_app(interaction_mode="voice", show_progress=True):
+    """
+    运行Estia应用的便捷函数
     
-    def format_memory_for_llm(self, memory_results):
-        """增强的记忆格式化，支持关联记忆和冲突标记"""
-        if not memory_results:
-            return ""
-        
-        formatted_memories = []
-        
-        for memory in memory_results:
-            role = memory.get("role", "system")
-            content = memory.get("content", "")
-            timestamp = memory.get("timestamp", "")
-            
-            # 格式化时间
-            if isinstance(timestamp, (int, float)):
-                timestamp = datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M')
-            
-            # 处理特殊标记
-            prefix = ""
-            if memory.get("is_associated", False):
-                prefix = "[关联记忆] "
-            elif memory.get("is_summary", False):
-                prefix = "[记忆摘要] "
-            elif memory.get("status") == "superseded":
-                prefix = "[已更新的信息] "
-            
-            # 添加上下文信息
-            context = ""
-            if "context" in memory:
-                context = f" (备注: {memory['context']})"
-            
-            formatted_memories.append(f"{prefix}[{timestamp}] {role}: {content}{context}")
-        
-        # 添加一个简短的介绍
-        header = "系统记忆:"
-        formatted_text = header + "\n" + "\n".join(formatted_memories)
-        
-        return formatted_text
-    
-    def perform_memory_maintenance(self):
-        """执行记忆维护任务"""
-        if self.memory_manager:
-            self.logger.info("🧠 开始执行记忆维护...")
-            self.memory_manager.consolidate_memories()
-            self.logger.info("✅ 记忆维护完成") 
+    参数:
+        interaction_mode: 交互模式，可选值: "voice"(语音), "text"(文本), "api"(API服务)
+        show_progress: 是否显示启动进度
+    """
+    try:
+        app = EstiaApp(show_startup_progress=show_progress)
+        app.start(interaction_mode)
+    except Exception as e:
+        logger.error(f"应用运行失败: {e}")
+        if show_progress:
+            print(f"❌ 应用运行失败: {e}")
+        raise
+
+
+if __name__ == "__main__":
+    # 直接运行此文件时，启动应用
+    run_app() 

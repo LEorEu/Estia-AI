@@ -1,0 +1,33 @@
+# Estia AI助手依赖列表
+# 注意: PyTorch需要根据CUDA版本单独安装，请使用install.bat自动安装
+
+# AI和机器学习
+openai>=1.0.0
+openai-whisper>=20240930
+transformers>=4.40.0
+sentence-transformers>=2.7.0
+
+# 向量检索
+faiss-cpu>=1.8.0
+
+# 音频处理
+sounddevice>=0.4.6
+soundfile>=0.12.1
+edge-tts>=6.1.10
+pygame>=2.5.0
+
+# 系统控制
+keyboard>=0.13.5
+
+# 网络请求
+requests>=2.31.0
+
+# 数据处理
+numpy>=1.24.0
+scipy>=1.11.0
+
+# 注意事项:
+# 1. 建议使用install.bat进行完整安装
+# 2. PyTorch版本会根据CUDA自动选择
+# 3. 如果网络不好，脚本会配置清华镜像源
+# 4. GPU用户会自动安装CUDA版本 

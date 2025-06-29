@@ -16,11 +16,6 @@ installer_files/env/
 # 如果不在，可以忽略这一行，或者修改路径
 llama/
 
-# 忽略 Oobabooga 存放用户数据和模型的文件夹（以防万一）
-text-generation-webui/user_data/models/
-text-generation-webui/user_data/logs/
-text-generation-webui/logs/
-
 # 忽略我们自己的项目生成的数据
 # 比如录音和AI生成的语音
 assets/audio/
@@ -43,3 +38,59 @@ temp_requirements.txt
 
 # 忽略我们下载的 .whl 安装包
 *.whl
+
+# 新的安装脚本相关忽略
+# 本地Miniconda安装
+miniconda3/
+# 项目本地Python环境
+env/
+# 安装包下载
+Miniconda3-Installer.exe
+# 自动生成的激活脚本
+activate.bat
+
+# 内存和缓存数据
+*.db
+*.db.backup_*
+*.db.id_migration_backup_*
+data/
+assets/memory.db*
+assets/test_*.db
+assets/audio/
+
+# 模型和AI相关
+models/
+*.bin
+*.meta
+*.safetensors
+*.onnx
+*.npy
+
+# 音频和多媒体
+data/tts/
+*.wav
+*.mp3
+*.flac
+*.m4a
+
+# 临时文件和日志
+temp/
+logs/
+*.log
+*.tmp
+*.temp
+
+# 其他运行时目录
+whl/
+old_system/
+llama/models/
+models/*.bin
+models/*.safetensors
+
+# 新的配置文件保护
+config/api_keys.py
+config/secrets.py
+config/local_settings.py
+
+#开发计划
+development_plan/

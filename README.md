@@ -1,95 +1,292 @@
-# Estia-AI 个人助手项目文档 V2.0
+# Estia AI 个人助手
 
-## 1. 项目简介 (Project Overview)
+## 🚀 运行
 
-本项目旨在创建一个完全在本地运行、可通过语音进行实时交互的个性化AI伴侣。经过一系列的技术探索和挑战，我们最终确立了一套以**稳定性**和**高性能**为核心的精简架构，成功地让一个强大的AI大语言模型在个人电脑上“活”了起来。
+### 方法1: 智能激活脚本（推荐）
+```bash
+activate_env.bat             # 自动检测并激活任何类型的环境
+python main.py              # 语音模式
+python main.py --mode text  # 文本模式
+```
 
-这个文档记录了项目的核心架构、标准启动流程、开发过程中的心得总结以及未来的发展计划。
+### 方法2: 手动激活（按环境类型）
+```bash
+# Python venv环境（简化版安装）：
+env\Scripts\activate.bat
 
-## 2. 技术架构 (Technical Architecture)
+# Conda全局环境：
+conda activate estia
 
-经过实践检验，我们最终确定的V2.0技术架构如下：
+# Conda本地环境：
+conda activate .\env
 
-* **AI大脑 (后端服务):**
-    * **核心:** 轻量级的 `llama.cpp` 服务器 (`server.exe`)。
-    * **职责:** 专门负责高效地加载GGUF格式的大语言模型，并通过API提供推理能力。
-    * **优点:** 极其稳定，资源占用小，绕开了所有复杂的Python环境依赖和编译问题。
+# 然后运行：
+python main.py              # 语音模式
+python main.py --mode text  # 文本模式
+```
 
-* **AI身体 (前端应用):**
-    * **核心:** 我们自己编写的 `estia` Python项目 (`main.py` + `core/` 模块)。
-    * **职责:** 负责语音的输入（录音）与输出（合成播放），以及作为“总指挥”与“大脑”的API进行逻辑交互。
+---
 
-* **核心组件选型:**
-    * **LLM 模型:** `Qwen/Qwen3-14B-Instruct-GGUF` (Q4_K_M) - 一个在能力和资源消耗上取得完美平衡的140亿参数模型。
-    * **语音识别 (STT):** `openai-whisper` (原生库) - 稳定可靠，识别率高，且不依赖Triton。
-    * **语音合成 (TTS):** `edge-tts` + `pygame` - 无需本地模型，声音质量高，播放稳定。
+## 项目概述
 
-* **通讯协议:**
-    * 两者之间通过本地HTTP网络进行通信，采用与OpenAI兼容的API格式。
+Estia是一个本地运行的个性化AI助手，具有语音交互能力和强大的记忆系统。它使用大语言模型作为核心，通过多层次记忆架构实现智能对话和长期记忆能力。
 
-## 3. 标准启动流程 (Standard Launch Procedure)
+## 系统架构
 
-本项目采用“大脑”与“身体”分离运行的模式，需要开启两个终端窗口。
+### 核心组件
 
-#### **第一步：启动“大脑” (Terminal 1)**
+- **AI大脑**: 基于`llama.cpp`的轻量级服务器，负责加载GGUF格式的大语言模型或者启用openai的api
+- **AI身体**: Python编写的前端应用，处理语音输入输出和记忆管理
+- **记忆系统**: 多层次记忆架构，支持缓存、修正和检索
+- **评分系统**: 对话重要性评估机制，决定记忆存储方式
 
-1.  打开一个PowerShell终端。
-2.  进入 `llama.cpp` 服务器所在的目录 (例如 `D:\estia\llama`)。
-3.  执行以下指令来加载模型并启动服务：
-    ```powershell
-    .\llama-server.exe -m .\models\Mistral-Small-3.1-24B-Instruct-2503-Q4_K_M.gguf -c 8192 -ngl 90
-    ```
-4.  等待看到 `server listening on http://127.0.0.1:8080` 的提示，**保持此窗口不要关闭**。
+## 记忆系统详解
 
-#### **第二步：启动“身体” (Terminal 2)**
+### 1. 多层次记忆架构
 
-1.  打开**第二个**全新的PowerShell终端。
-2.  激活我们为应用创建的专属Conda环境：
-    ```powershell
-    conda activate estia_app
-    ```
-3.  进入我们自己的项目主目录 (例如 `D:\estia`)。
-    ```powershell
-    cd D:\estia
-    ```
-4.  运行主程序：
-    ```powershell
-    $env:HF_ENDPOINT = "https://hf-mirror.com"
-    python main.py
-    ```
-5.  根据提示，按回车键开始录音，与你的AI助手进行对话。在程序运行时，按 `Ctrl+C` 可以优雅地退出。
+Estia的记忆系统由四个层次组成，按重要性和访问频率划分：
 
-## 4. 项目总结与心得 (Project Summary & Learnings)
+- **核心记忆**: 存储最重要的用户信息（如姓名、生日、联系方式），永不遗忘
+- **归档记忆**: 存储重要但不常用的信息（如生活事件、背景故事）
+- **长期记忆**: 存储普通的个人信息和知识（如兴趣爱好、一般性偏好）
+- **短期记忆**: 存储临时对话内容，有时间衰减机制
 
-* **环境配置是最大的挑战：** 在Windows上进行AI开发，最大的敌人往往不是代码逻辑，而是底层的编译环境。正确安装Visual Studio C++ Build Tools和NVIDIA CUDA Toolkit是成功编译`llama-cpp-python`等库的前提。
-* **模型格式的选择至关重要：** GGUF格式配合`llama.cpp`后端，是目前在个人Windows电脑上运行大模型最稳定、最通用的解决方案。AWQ等格式虽然性能强大，但其依赖的`flash-attention`和`triton`在Windows上存在难以解决的兼容性问题。
-* **依赖管理的复杂性：** 一个庞大的项目（如Oobabooga）拥有复杂的依赖树。手动安装或修复依赖时，很容易陷入“按下葫芦浮起瓢”的困境。创建一个干净、最小化的独立环境是最佳实践。
-* **从用户到开发者的转变：** 遇到问题时，不能只等待解决方案。通过主动阅读错误日志、分析脚本源代码，甚至直接修改它，我们才能真正掌控一个项目，并从根源上解决问题。
+每个层次的记忆都有不同的存储方式、权重和检索优先级。
 
-## 5. 未来计划 (Future Roadmap)
+### 2. 记忆存储方式
 
-我们的AI助手现在只是一个“初生的婴儿”，未来还有无限的成长空间。
+- **JSON文件存储**: 
+  - 核心记忆: `data/memory/core_memory.json`
+  - 归档记忆: `data/memory/archival_memory.json`
+  - 长期记忆元数据: `data/memory/long_term_metadata.json`
 
-* **近期 (Short-term):**
-    * **记忆系统 (`memory.py`):** 实现一个简单的短期记忆功能，让她能记住最近几轮的对话内容，进行更连贯的交流。
-    * **人格定制 (`personality.py`):** 创建一个灵活的人格管理系统，可以轻松地通过修改配置文件，让她扮演不同的角色（如老师、朋友、游戏伙伴等）。
-    * **声音定制 (TTS):** 探索 `GPT-SoVITS` 等声音克隆技术，用你喜欢的声音（甚至你自己的声音）替换掉当前的 `Edge-TTS`。
+- **数据库存储**: 
+  - 使用SQLite数据库存储所有对话历史
+  - 支持按ID、内容、时间和权重检索
 
-* **中期 (Mid-term):**
-    * **唤醒词 (`Wake Word`):** 研究并集成 `pvporcupine` 等唤醒词引擎，实现通过呼叫她的名字来激活对话，取代“按回车键”的交互方式。
-    * **QLoRA 微调:** 尝试对一个基础模型（如Qwen3-8B-Base）进行QLoRA微调，训练一个拥有独一无二知识或说话风格的专属模型。
+- **内存缓存**: 
+  - 热缓存: 存储最常访问和最重要的记忆(默认200条)
+  - 温缓存: 存储次常访问的记忆(默认1000条)
 
-* **长期 (Long-term):**
-    * **视觉能力 (`game_vision.py`):** 集成 `OpenCV`，让她能够“看到”你的游戏画面，并就游戏内容与你展开交流。
-    * **工具使用 (Tool Use):** 让她学会使用外部工具，比如查询实时天气、上网搜索信息、执行简单的计算等。
+### 3. 高级特性
 
-## 6. Q&A / 常见问题解答
+- **记忆缓存系统**: 
+  - 热/温双层缓存机制
+  - 关键词索引加速检索
+  - 动态缓存提升策略
 
-**Q1: 为什么在Windows上安装某些AI库时，总是提示缺少C++编译器？**
-**A:** 因为这些库（如`llama-cpp-python`）包含C++源代码，需要在使用者的电脑上进行“现场编译”才能安装。这要求系统必须安装了“C++编译工具箱”，最标准的方式就是安装Visual Studio并勾选“使用C++的桌面开发”组件。
+- **记忆修正机制**: 
+  - 支持更新错误记忆
+  - 保留修正历史，降低旧记忆权重
 
-**Q2: 为什么 `transformers` 库会报 `triton` 找不到的错误？**
-**A:** 这是Windows平台的兼容性“天花板”。新版的`transformers`为了性能，会尝试调用`flash-attention`库，而`flash-attention`又依赖一个叫`triton`的底层库。`triton`官方目前不提供Windows版本，因此这条依赖链在Windows上是断裂的。解决方案是采用不经过这条依赖链的技术栈，比如我们最终选择的`llama.cpp`。
+- **关联网络**:
+  - 建立记忆之间的语义关联
+  - 增强相关记忆的检索能力
 
-**Q3: 为什么我们最终放弃了Oobabooga，转而使用`llama.cpp`服务器？**
-**A:** Oobabooga是一个功能强大但极其复杂的“All-in-One”平台，它的众多依赖（特别是WebUI相关的）在我们复杂的网络和系统环境下，造成了难以解决的兼容性问题。为了追求系统的**极致稳定和简洁**，我们回归本源，只采用其核心的推理引擎`llama.cpp`作为独立的后台服务，从而绕开了所有不必要的复杂性。
+## 评分系统详解
+
+### 1. 评分原理
+
+评分系统决定对话的重要性，通过三级优先级机制：
+
+- **规则优先**: 基于关键词和模式的硬编码规则
+- **人工干预**: 用户可手动标记重要性
+- **LLM评估**: 使用大模型智能判断重要性
+
+### 2. 权重机制
+
+每条记忆都有1-10的权重值：
+- **10分**: 核心个人信息、用户明确指令
+- **8分**: 重要生活事件、兴趣爱好
+- **6分**: 有意义的深入探讨
+- **4分**: 普通闲聊或问答
+- **2分**: 无信息量的日常问候
+
+### 3. 异步评分
+
+系统使用异步线程池处理评分，不影响主对话流程：
+- 对话完成后，评分任务提交到后台线程
+- 线程完成评分后将结果写入数据库
+- 主程序可继续处理用户交互，不受阻塞
+
+## 工作流程
+
+Estia的完整记忆处理流程如下：
+
+1. **输入处理**:
+   - 用户语音输入转文本
+   - 文本进行向量嵌入
+
+2. **对话处理**:
+   - 检索相关记忆（优先从缓存中查找）
+   - 将记忆与当前输入一起发送给LLM
+   - LLM生成回复
+
+3. **记忆评估**:
+   - 对话完成后启动异步评分
+   - 根据规则和LLM评估确定权重
+   - 根据权重决定记忆层级
+
+4. **记忆存储**:
+   - 将用户输入和AI回复存入数据库
+   - 根据层级决定是否写入特定记忆文件
+   - 更新记忆缓存
+
+5. **记忆优化**:
+   - 定期执行记忆衰减
+   - 合并重复记忆
+   - 汇总长期记忆
+
+## 使用指南
+
+### 测试记忆系统
+
+按以下顺序运行测试脚本：
+
+```bash
+# 基础记忆功能测试
+python scripts/test_memory_simple.py
+
+# 记忆缓存测试
+python scripts/test_memory_cache.py
+
+# 记忆修正测试
+python scripts/test_memory_correction.py
+
+# 评分系统测试
+python scripts/test_score_system.py
+
+# 完整记忆系统测试
+python scripts/test_memory.py
+```
+
+### 常见问题
+
+1. **记忆检索失败**:
+   - 确保向量模型已正确加载
+   - 检查数据目录是否存在(data/memory/)
+   - 验证数据库连接正常
+
+2. **记忆权重异常**:
+   - 检查intent_parser.py中的关键词设置
+   - 确保LLM连接正常
+   - 查看score_async_executor.py日志
+
+3. **缓存统计异常**:
+   - 重置缓存：`manager.cache.clear()`
+   - 增加日志级别获取详细信息
+
+## 未来计划
+
+1. **改进中文分词支持**
+   - 集成专门的中文分词库
+
+2. **增强记忆压缩**
+   - 实现更智能的记忆整合
+   - 基于时间的自动记忆压缩
+
+3. **个性化特征**
+   - 根据用户交互调整记忆权重
+   - 添加兴趣标签和情感分析
+
+
+## 📁 目录结构概览
+- `estia/core/memory/init`
+- `estia/core/memory/embedding`
+- `estia/core/memory/retrieval`
+- `estia/core/memory/association`
+- `estia/core/memory/context`
+- `estia/core/memory/ranking`
+- `estia/core/memory/storage`
+- `estia/core/audio`
+- `estia/core/dialogue`
+- `estia/core/utils`
+- `estia/config`
+- `estia/scripts`
+- `estia/tests/test_memory`
+- `estia/tests/test_dialogue`
+- `estia/tests/test_integration`
+- `estia/data/memory`
+- `estia/data/vectors`
+
+## 🌟 模块说明与职责
+- `memory/init/`: 初始化数据库与向量索引（FAISS + SQLite）
+- `memory/embedding/`: 文本向量化与嵌入缓存
+- `memory/retrieval/`: FAISS 检索逻辑封装
+- `memory/association/`: 记忆关联网络管理（自动关联、多跳联想）
+- `memory/context/`: 根据 session_id 获取历史会话或摘要
+- `memory/ranking/`: 记忆评分、排序与去重策略
+- `memory/storage/`: 统一记忆存储与管理接口（写入、更新）
+- `audio/`: Whisper 转文字 + TTS 合成语音模块
+- `dialogue/`: 对话主逻辑（生成、处理、人格等）
+- `utils/`: 通用配置与日志工具
+- `scripts/`: 索引构建、清理维护等开发工具脚本
+- `tests/`: 单元测试与集成测试目录
+
+
+estia/
+├── core/
+│   ├── memory/               # 专注于记忆系统
+│   │   ├── init/             # 步骤1: 初始化向量索引和数据库
+│   │   │   ├── __init__.py
+│   │   │   ├── db_manager.py
+│   │   │   └── vector_index.py
+│   │   │
+│   │   ├── embedding/        # 步骤3: 文本向量化
+│   │   │   ├── __init__.py
+│   │   │   ├── vectorizer.py
+│   │   │   └── cache.py      # 嵌入缓存
+│   │   │
+│   │   ├── retrieval/        # 步骤4: FAISS搜索
+│   │   │   ├── __init__.py
+│   │   │   └── faiss_search.py
+│   │   │
+│   │   ├── association/      # 步骤5: 关联网络拓展
+│   │   │   ├── __init__.py
+│   │   │   └── network.py
+│   │   │
+│   │   ├── context/          # 步骤6: 获取对话记录
+│   │   │   ├── __init__.py
+│   │   │   └── history.py
+│   │   │
+│   │   ├── ranking/          # 步骤7: 权重优先排序
+│   │   │   ├── __init__.py
+│   │   │   └── scorer.py
+│   │   │
+│   │   ├── storage/          # 存储相关功能
+│   │   │   ├── __init__.py
+│   │   │   └── memory_store.py
+│   │   │
+│   │   └── pipeline.py       # 记忆系统的流程控制
+│   │
+│   ├── audio/                # 音频处理相关
+│   │   ├── input.py          # 步骤2: 语音输入转文本
+│   │   └── output.py         # 语音输出
+│   │
+│   ├── dialogue/             # 对话系统
+│   │   ├── engine.py         # 对话引擎核心
+│   │   ├── personality.py    # 人格设定
+│   │   ├── generation.py     # 步骤9: LLM生成回复
+│   │   └── processing.py     # 步骤10-11: 异步处理和评估
+│   │
+│   ├── utils/                # 通用工具函数
+│   │   ├── config_loader.py
+│   │   └── logger.py
+│   │
+│   └── app.py               # 应用主控制器，整合所有功能
+│
+├── config/                   # 配置文件
+│   └── settings.py
+│
+├── data/                     # 数据存储
+│   ├── memory/
+│   └── vectors/
+│
+├── scripts/                  # 实用脚本
+│   ├── build_index.py
+│   └── maintenance.py
+│
+└── tests/                    # 测试用例
+    ├── test_memory/
+    ├── test_dialogue/
+    └── test_integration/

@@ -1,75 +1,89 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
 """
-Estia AI 主程序入口
+Estia AI助手启动入口
+
+使用方法：
+    python main.py  # 默认启动语音交互模式
+    或
+    python main.py --mode text  # 文本交互模式
 """
 
-import time
-import logging
 import os
-import threading
+import sys
+import argparse
+import logging
+from datetime import datetime
 
+# 配置日志
 from config import settings
-from core.app import EstiaApp
 
-def setup_logger():
-    """设置日志记录器"""
-    log_dir = settings.LOG_DIR
-    os.makedirs(log_dir, exist_ok=True)
+def setup_logging():
+    """设置日志记录"""
+    # 创建日志目录
+    os.makedirs(settings.LOG_DIR, exist_ok=True)
     
-    logger = logging.getLogger("estia")
-    logger.setLevel(logging.INFO)
+    # 生成日志文件名
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file = os.path.join(settings.LOG_DIR, f"estia_{timestamp}.log")
     
-    # 文件处理器
-    file_handler = logging.FileHandler(os.path.join(log_dir, "estia.log"), encoding="utf-8")
-    file_handler.setLevel(logging.INFO)
+    # 配置日志格式和级别
+    logger = logging.getLogger()
+    logger.setLevel(getattr(logging, settings.LOG_LEVEL))
     
-    # 控制台处理器
+    # 创建控制台处理器（使用默认编码）
     console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.INFO)
+    console_handler.setLevel(getattr(logging, settings.LOG_LEVEL))
+    console_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    console_handler.setFormatter(console_formatter)
     
-    # 格式化器
-    formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-    file_handler.setFormatter(formatter)
-    console_handler.setFormatter(formatter)
+    # 创建文件处理器（指定UTF-8编码）
+    file_handler = logging.FileHandler(log_file, encoding='utf-8')
+    file_handler.setLevel(getattr(logging, settings.LOG_LEVEL))
+    file_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    file_handler.setFormatter(file_formatter)
     
-    # 添加处理器
-    logger.addHandler(file_handler)
+    # 添加处理器到根记录器
     logger.addHandler(console_handler)
+    logger.addHandler(file_handler)
     
-    return logger
+    return logging.getLogger("estia.main")
+
+def parse_arguments():
+    """解析命令行参数"""
+    parser = argparse.ArgumentParser(description="Estia AI助手")
+    
+    parser.add_argument(
+        "--mode",
+        choices=["voice", "text", "api"],
+        default="voice",
+        help="交互模式: voice (语音), text (文本), api (API服务)"
+    )
+    
+    return parser.parse_args()
 
 def main():
-    """主程序入口"""
-    # 初始化日志
-    logger = setup_logger()
-    logger.info("🚀 Estia AI 启动中...")
+    """程序入口"""
+    # 设置日志
+    logger = setup_logging()
+    logger.info("Estia AI助手启动中...")
+    
+    # 解析命令行参数
+    args = parse_arguments()
     
     try:
-        # 创建应用实例
-        app = EstiaApp(logger)
-        
-        # 初始化应用
-        app.initialize()
-        
-        # 启动记忆维护线程
-        def memory_maintenance_task():
-            while True:
-                try:
-                    app.perform_memory_maintenance()
-                except Exception as e:
-                    logger.error(f"记忆维护出错: {e}")
-                
-                # 休眠6小时后再次执行
-                time.sleep(6 * 3600)
-        
-        maintenance_thread = threading.Thread(target=memory_maintenance_task, daemon=True)
-        maintenance_thread.start()
-        logger.info("✅ 记忆维护任务已启动")
-        
-        # 运行主循环
-        app.run()
-        
+        # 导入并运行应用
+        from core.app import run_app
+        run_app(interaction_mode=args.mode)
+    except KeyboardInterrupt:
+        logger.info("用户中断，程序退出")
     except Exception as e:
-        logger.error(f"❌ 程序初始化失败: {e}", exc_info=True)
-        
+        logger.error(f"启动失败: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        print("\n程序遇到错误，详情请查看日志。")
+        sys.exit(1)
+
 if __name__ == "__main__":
     main()
