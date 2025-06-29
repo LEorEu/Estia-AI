@@ -1,26 +1,8 @@
 # Estia AI 个人助手
 
-## 🚀 运行
-
-### 方法1: 智能激活脚本（推荐）
+## 🚀 运行智能激活脚本（推荐）
 ```bash
-activate_env.bat             # 自动检测并激活任何类型的环境
-python main.py              # 语音模式
-python main.py --mode text  # 文本模式
-```
-
-### 方法2: 手动激活（按环境类型）
-```bash
-# Python venv环境（简化版安装）：
-env\Scripts\activate.bat
-
-# Conda全局环境：
-conda activate estia
-
-# Conda本地环境：
-conda activate .\env
-
-# 然后运行：
+start.bat             # 自动检测并激活任何类型的环境
 python main.py              # 语音模式
 python main.py --mode text  # 文本模式
 ```

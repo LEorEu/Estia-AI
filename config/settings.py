@@ -20,7 +20,7 @@ OPENAI_API_BASE = "https://api.openai.com/v1"
 OPENAI_MODEL = "gpt-3.5-turbo"  # 可选: gpt-3.5-turbo, gpt-4, 等
 
 # DeepSeek API 配置（可选）
-DEEPSEEK_API_KEY = "sk-d29fae2aa41b44a287247222a7e09e8e"  # 如果使用DeepSeek，请填写您的API密钥
+DEEPSEEK_API_KEY = ""  # 如果使用DeepSeek，请填写您的API密钥
 DEEPSEEK_API_BASE = "https://api.deepseek.com"
 DEEPSEEK_MODEL = "deepseek-chat"  # 可根据实际可用模型调整
 
