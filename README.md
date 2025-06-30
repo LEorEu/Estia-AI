@@ -1,274 +1,280 @@
-# Estia AI 个人助手
+# Estia AI 智能助手
 
-## 🚀 运行智能激活脚本（推荐）
+> 🤖 一个具有先进记忆系统的本地AI助手，支持语音交互、智能对话和持久化记忆
+
+## ✨ 项目亮点
+
+- **🧠 先进记忆系统**：13步记忆处理工作流，智能记忆管理和上下文构建
+- **🎙️ 语音交互**：基于Whisper的语音识别和TTS语音合成
+- **🔄 智能对话**：支持多种LLM提供商（本地/OpenAI/DeepSeek/Gemini）
+- **⚡ 异步处理**：后台异步记忆评估，不影响对话流畅性
+- **🎯 个性化**：可配置的AI人格和交互模式
+- **🔧 模块化设计**：清晰的架构分层，易于扩展和维护
+
+## 🚀 快速开始
+
+### 1. 环境安装
+
 ```bash
-start.bat             # 自动检测并激活任何类型的环境
-python main.py              # 语音模式
-python main.py --mode text  # 文本模式
+# 克隆项目
+git clone https://github.com/your-username/estia-ai.git
+cd estia-ai
+
+# 运行安装脚本
+cd setup
+install.bat
+
+# 返回项目根目录
+cd ..
 ```
+
+### 2. 配置设置
+
+编辑 `config/settings.py` 配置你的API密钥：
+
+```python
+# 选择模型提供商
+MODEL_PROVIDER = "deepseek"  # 可选: "local", "openai", "deepseek", "gemini"
+
+# 配置对应的API密钥
+DEEPSEEK_API_KEY = "your-api-key-here"
+```
+
+### 3. 启动应用
+
+```bash
+# 使用启动脚本（推荐）
+start.bat
+
+# 或者手动启动
+python main.py --mode voice    # 语音模式
+python main.py --mode text     # 文本模式
+```
+
+## 🏗️ 系统架构
+
+### 核心模块
+
+```
+estia/
+├── core/                    # 核心功能模块
+│   ├── app.py              # 应用主控制器
+│   ├── memory/             # 记忆系统
+│   │   ├── pipeline.py     # 记忆处理主管道
+│   │   ├── init/           # 数据库和向量索引初始化
+│   │   ├── retrieval/      # 智能检索系统
+│   │   ├── evaluator/      # 异步记忆评估
+│   │   ├── context/        # 上下文构建
+│   │   ├── storage/        # 记忆存储管理
+│   │   ├── embedding/      # 向量嵌入和缓存
+│   │   └── association/    # 记忆关联网络
+│   ├── dialogue/           # 对话系统
+│   │   ├── engine.py       # 对话引擎
+│   │   ├── personality.py  # AI人格设定
+│   │   └── processing.py   # 对话处理逻辑
+│   ├── audio/              # 音频处理
+│   │   ├── system.py       # 音频系统管理
+│   │   ├── input.py        # 语音输入（Whisper）
+│   │   ├── output.py       # 语音输出（TTS）
+│   │   └── keyboard_control.py # 键盘控制
+│   ├── prompts/            # 提示词管理
+│   │   ├── memory_evaluation.py # 记忆评估提示词
+│   │   └── dialogue_generation.py # 对话生成提示词
+│   ├── utils/              # 工具函数
+│   └── vision/             # 视觉处理（游戏画面识别）
+├── config/                 # 配置文件
+├── data/                   # 数据存储
+├── logs/                   # 日志文件
+├── tests/                  # 测试用例
+└── setup/                  # 安装脚本
+```
+
+### 记忆系统工作流程
+
+Estia的记忆系统采用13步处理流程：
+
+1. **Step 1-2**：数据库初始化和向量化
+2. **Step 3**：记忆存储到数据库
+3. **Step 4**：FAISS向量相似度检索
+4. **Step 5**：关联网络扩展相关记忆
+5. **Step 6**：历史记忆检索
+6. **Step 7**：记忆排序和去重
+7. **Step 8**：智能上下文构建
+8. **Step 9-10**：LLM对话生成
+9. **Step 11**：LLM异步评估记忆重要性
+10. **Step 12**：异步存储评估结果
+11. **Step 13**：自动建立记忆关联
+
+## 🧠 记忆系统特性
+
+### 智能检索策略
+
+- **启动记忆**：首次对话主动提供最近5条+高权重5条记忆
+- **历史查询**：检测"还记得"等关键词，返回相关历史记忆
+- **关键词搜索**：基于用户输入的关键词进行精确匹配
+- **语义检索**：使用FAISS向量检索找到语义相似的记忆
+
+### 记忆评估机制
+
+- **权重评分**：1-10分评价记忆重要性
+- **智能摘要**：根据内容类型生成不同详细程度的摘要
+- **话题分组**：自动识别和分类对话话题
+- **异步处理**：后台处理不影响对话流畅性
+
+### 上下文构建
+
+- **分层结构**：角色设定→核心记忆→相关记忆→话题摘要→用户输入
+- **智能截断**：根据重要性和相关性优化上下文长度
+- **个性化增强**：结合用户偏好和历史交互模式
+
+## 🎙️ 语音交互
+
+### 语音识别
+- 基于OpenAI Whisper模型
+- 支持实时语音转文本
+- 可配置识别语言和模型精度
+
+### 语音合成
+- 支持多种TTS引擎
+- 可配置语音、语速和音量
+- 自然流畅的中文语音输出
+
+### 键盘控制
+- 热键触发录音（默认T键）
+- 自动静音检测
+- 可配置录音参数
+
+## 🤖 对话引擎
+
+### 多模型支持
+- **本地模型**：基于llama.cpp的本地部署
+- **OpenAI**：GPT-3.5/GPT-4系列
+- **DeepSeek**：DeepSeek-Chat等模型
+- **Gemini**：Google Gemini系列
+
+### 个性化设定
+- 可配置AI人格（友好、专业、幽默等）
+- 支持自定义提示词模板
+- 个性化回复风格
+
+## 📊 性能特性
+
+### 缓存优化
+- 多级记忆缓存机制
+- 向量嵌入缓存
+- 智能缓存失效策略
+
+### 异步处理
+- 后台异步记忆评估
+- 非阻塞记忆存储
+- 并发处理提升响应速度
+
+### 数据库优化
+- SQLite高效存储
+- 索引优化查询性能
+- 事务处理保证数据一致性
+
+## 🔧 配置选项
+
+### 基础配置
+```python
+# 模型提供商
+MODEL_PROVIDER = "deepseek"
+
+# 语音设置
+WHISPER_MODEL_ID = "openai/whisper-large-v3-turbo"
+TTS_VOICE = "zh-CN-XiaoyiNeural"
+
+# 记忆设置
+MEMORY_CACHE_SIZE = 1000
+CONTEXT_WINDOW_SIZE = 10
+
+# 热键设置
+RECORD_HOTKEY = "t"
+RECORD_MAX_DURATION = 60
+```
+
+### 高级配置
+- API端点自定义
+- 记忆评估参数调整
+- 缓存策略配置
+- 日志级别设置
+
+## 🧪 测试和开发
+
+### 运行测试
+```bash
+# 记忆系统测试
+python tests/test_memory_pipeline.py
+
+# 异步评估测试
+python tests/test_async_evaluator.py
+
+# 完整工作流测试
+python tests/test_complete_workflow.py
+```
+
+### 开发工具
+```bash
+# 环境检查
+python setup/check_env.py
+
+# 数据库初始化
+python scripts/fix_database_schema.py
+
+# 向量索引构建
+python scripts/build_index.py
+```
+
+## 📈 项目状态
+
+### 已完成功能
+- ✅ 完整的13步记忆处理流程
+- ✅ 智能检索和上下文构建
+- ✅ 异步记忆评估系统
+- ✅ 多模型对话引擎支持
+- ✅ 语音输入输出功能
+- ✅ 模块化架构设计
+
+### 开发中功能
+- 🔄 游戏画面识别（vision模块）
+- 🔄 更多个性化设定选项
+- 🔄 Web API接口
+
+### 计划功能
+- 📋 移动端支持
+- 📋 多语言支持
+- 📋 插件系统
+- 📋 云端同步
+
+## 🤝 贡献指南
+
+欢迎提交Issue和Pull Request！
+
+### 开发环境设置
+1. Fork项目
+2. 创建开发分支
+3. 安装开发依赖
+4. 运行测试确保功能正常
+5. 提交代码并创建PR
+
+### 代码规范
+- 使用中文注释
+- 遵循PEP 8代码风格
+- 添加适当的类型提示
+- 编写测试用例
+
+## 📄 许可证
+
+本项目采用MIT许可证 - 详见 [LICENSE](LICENSE) 文件
+
+## 🙏 致谢
+
+- OpenAI Whisper - 语音识别
+- Hugging Face - 模型和工具
+- FAISS - 向量检索
+- 所有贡献者和用户的支持
 
 ---
 
-## 项目概述
-
-Estia是一个本地运行的个性化AI助手，具有语音交互能力和强大的记忆系统。它使用大语言模型作为核心，通过多层次记忆架构实现智能对话和长期记忆能力。
-
-## 系统架构
-
-### 核心组件
-
-- **AI大脑**: 基于`llama.cpp`的轻量级服务器，负责加载GGUF格式的大语言模型或者启用openai的api
-- **AI身体**: Python编写的前端应用，处理语音输入输出和记忆管理
-- **记忆系统**: 多层次记忆架构，支持缓存、修正和检索
-- **评分系统**: 对话重要性评估机制，决定记忆存储方式
-
-## 记忆系统详解
-
-### 1. 多层次记忆架构
-
-Estia的记忆系统由四个层次组成，按重要性和访问频率划分：
-
-- **核心记忆**: 存储最重要的用户信息（如姓名、生日、联系方式），永不遗忘
-- **归档记忆**: 存储重要但不常用的信息（如生活事件、背景故事）
-- **长期记忆**: 存储普通的个人信息和知识（如兴趣爱好、一般性偏好）
-- **短期记忆**: 存储临时对话内容，有时间衰减机制
-
-每个层次的记忆都有不同的存储方式、权重和检索优先级。
-
-### 2. 记忆存储方式
-
-- **JSON文件存储**: 
-  - 核心记忆: `data/memory/core_memory.json`
-  - 归档记忆: `data/memory/archival_memory.json`
-  - 长期记忆元数据: `data/memory/long_term_metadata.json`
-
-- **数据库存储**: 
-  - 使用SQLite数据库存储所有对话历史
-  - 支持按ID、内容、时间和权重检索
-
-- **内存缓存**: 
-  - 热缓存: 存储最常访问和最重要的记忆(默认200条)
-  - 温缓存: 存储次常访问的记忆(默认1000条)
-
-### 3. 高级特性
-
-- **记忆缓存系统**: 
-  - 热/温双层缓存机制
-  - 关键词索引加速检索
-  - 动态缓存提升策略
-
-- **记忆修正机制**: 
-  - 支持更新错误记忆
-  - 保留修正历史，降低旧记忆权重
-
-- **关联网络**:
-  - 建立记忆之间的语义关联
-  - 增强相关记忆的检索能力
-
-## 评分系统详解
-
-### 1. 评分原理
-
-评分系统决定对话的重要性，通过三级优先级机制：
-
-- **规则优先**: 基于关键词和模式的硬编码规则
-- **人工干预**: 用户可手动标记重要性
-- **LLM评估**: 使用大模型智能判断重要性
-
-### 2. 权重机制
-
-每条记忆都有1-10的权重值：
-- **10分**: 核心个人信息、用户明确指令
-- **8分**: 重要生活事件、兴趣爱好
-- **6分**: 有意义的深入探讨
-- **4分**: 普通闲聊或问答
-- **2分**: 无信息量的日常问候
-
-### 3. 异步评分
-
-系统使用异步线程池处理评分，不影响主对话流程：
-- 对话完成后，评分任务提交到后台线程
-- 线程完成评分后将结果写入数据库
-- 主程序可继续处理用户交互，不受阻塞
-
-## 工作流程
-
-Estia的完整记忆处理流程如下：
-
-1. **输入处理**:
-   - 用户语音输入转文本
-   - 文本进行向量嵌入
-
-2. **对话处理**:
-   - 检索相关记忆（优先从缓存中查找）
-   - 将记忆与当前输入一起发送给LLM
-   - LLM生成回复
-
-3. **记忆评估**:
-   - 对话完成后启动异步评分
-   - 根据规则和LLM评估确定权重
-   - 根据权重决定记忆层级
-
-4. **记忆存储**:
-   - 将用户输入和AI回复存入数据库
-   - 根据层级决定是否写入特定记忆文件
-   - 更新记忆缓存
-
-5. **记忆优化**:
-   - 定期执行记忆衰减
-   - 合并重复记忆
-   - 汇总长期记忆
-
-## 使用指南
-
-### 测试记忆系统
-
-按以下顺序运行测试脚本：
-
-```bash
-# 基础记忆功能测试
-python scripts/test_memory_simple.py
-
-# 记忆缓存测试
-python scripts/test_memory_cache.py
-
-# 记忆修正测试
-python scripts/test_memory_correction.py
-
-# 评分系统测试
-python scripts/test_score_system.py
-
-# 完整记忆系统测试
-python scripts/test_memory.py
-```
-
-### 常见问题
-
-1. **记忆检索失败**:
-   - 确保向量模型已正确加载
-   - 检查数据目录是否存在(data/memory/)
-   - 验证数据库连接正常
-
-2. **记忆权重异常**:
-   - 检查intent_parser.py中的关键词设置
-   - 确保LLM连接正常
-   - 查看score_async_executor.py日志
-
-3. **缓存统计异常**:
-   - 重置缓存：`manager.cache.clear()`
-   - 增加日志级别获取详细信息
-
-## 未来计划
-
-1. **改进中文分词支持**
-   - 集成专门的中文分词库
-
-2. **增强记忆压缩**
-   - 实现更智能的记忆整合
-   - 基于时间的自动记忆压缩
-
-3. **个性化特征**
-   - 根据用户交互调整记忆权重
-   - 添加兴趣标签和情感分析
-
-
-## 📁 目录结构概览
-- `estia/core/memory/init`
-- `estia/core/memory/embedding`
-- `estia/core/memory/retrieval`
-- `estia/core/memory/association`
-- `estia/core/memory/context`
-- `estia/core/memory/ranking`
-- `estia/core/memory/storage`
-- `estia/core/audio`
-- `estia/core/dialogue`
-- `estia/core/utils`
-- `estia/config`
-- `estia/scripts`
-- `estia/tests/test_memory`
-- `estia/tests/test_dialogue`
-- `estia/tests/test_integration`
-- `estia/data/memory`
-- `estia/data/vectors`
-
-## 🌟 模块说明与职责
-- `memory/init/`: 初始化数据库与向量索引（FAISS + SQLite）
-- `memory/embedding/`: 文本向量化与嵌入缓存
-- `memory/retrieval/`: FAISS 检索逻辑封装
-- `memory/association/`: 记忆关联网络管理（自动关联、多跳联想）
-- `memory/context/`: 根据 session_id 获取历史会话或摘要
-- `memory/ranking/`: 记忆评分、排序与去重策略
-- `memory/storage/`: 统一记忆存储与管理接口（写入、更新）
-- `audio/`: Whisper 转文字 + TTS 合成语音模块
-- `dialogue/`: 对话主逻辑（生成、处理、人格等）
-- `utils/`: 通用配置与日志工具
-- `scripts/`: 索引构建、清理维护等开发工具脚本
-- `tests/`: 单元测试与集成测试目录
-
-
-estia/
-├── core/
-│   ├── memory/               # 专注于记忆系统
-│   │   ├── init/             # 步骤1: 初始化向量索引和数据库
-│   │   │   ├── __init__.py
-│   │   │   ├── db_manager.py
-│   │   │   └── vector_index.py
-│   │   │
-│   │   ├── embedding/        # 步骤3: 文本向量化
-│   │   │   ├── __init__.py
-│   │   │   ├── vectorizer.py
-│   │   │   └── cache.py      # 嵌入缓存
-│   │   │
-│   │   ├── retrieval/        # 步骤4: FAISS搜索
-│   │   │   ├── __init__.py
-│   │   │   └── faiss_search.py
-│   │   │
-│   │   ├── association/      # 步骤5: 关联网络拓展
-│   │   │   ├── __init__.py
-│   │   │   └── network.py
-│   │   │
-│   │   ├── context/          # 步骤6: 获取对话记录
-│   │   │   ├── __init__.py
-│   │   │   └── history.py
-│   │   │
-│   │   ├── ranking/          # 步骤7: 权重优先排序
-│   │   │   ├── __init__.py
-│   │   │   └── scorer.py
-│   │   │
-│   │   ├── storage/          # 存储相关功能
-│   │   │   ├── __init__.py
-│   │   │   └── memory_store.py
-│   │   │
-│   │   └── pipeline.py       # 记忆系统的流程控制
-│   │
-│   ├── audio/                # 音频处理相关
-│   │   ├── input.py          # 步骤2: 语音输入转文本
-│   │   └── output.py         # 语音输出
-│   │
-│   ├── dialogue/             # 对话系统
-│   │   ├── engine.py         # 对话引擎核心
-│   │   ├── personality.py    # 人格设定
-│   │   ├── generation.py     # 步骤9: LLM生成回复
-│   │   └── processing.py     # 步骤10-11: 异步处理和评估
-│   │
-│   ├── utils/                # 通用工具函数
-│   │   ├── config_loader.py
-│   │   └── logger.py
-│   │
-│   └── app.py               # 应用主控制器，整合所有功能
-│
-├── config/                   # 配置文件
-│   └── settings.py
-│
-├── data/                     # 数据存储
-│   ├── memory/
-│   └── vectors/
-│
-├── scripts/                  # 实用脚本
-│   ├── build_index.py
-│   └── maintenance.py
-│
-└── tests/                    # 测试用例
-    ├── test_memory/
-    ├── test_dialogue/
-    └── test_integration/
+**Estia AI** - 让AI助手真正理解和记住你 🌟
