@@ -1,0 +1,53 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# 开发工作流指南
+
+## 项目设置
+
+### 环境准备
+1. 使用 [activate.bat](mdc:activate.bat) 激活虚拟环境
+2. 参考 [setup/INSTALL_STEPS.md](mdc:setup/INSTALL_STEPS.md) 进行完整安装
+3. 运行 [setup/check_env.py](mdc:setup/check_env.py) 检查环境配置
+
+### 项目启动
+- 使用 [start.bat](mdc:start.bat) 启动完整系统
+- 或直接运行 [main.py](mdc:main.py) 进行开发调试
+
+## 开发脚本
+
+### 数据库管理
+- [scripts/build_index.py](mdc:scripts/build_index.py) - 构建向量索引
+- [scripts/fix_database_schema.py](mdc:scripts/fix_database_schema.py) - 修复数据库架构
+- [scripts/migrate_id_column.py](mdc:scripts/migrate_id_column.py) - 数据库迁移
+
+## 配置管理
+
+### 主配置文件
+- [config/settings.py](mdc:config/settings.py) - 全局配置设置
+
+### 工具配置
+- [core/utils/config_loader.py](mdc:core/utils/config_loader.py) - 配置加载器
+- [core/utils/logger.py](mdc:core/utils/logger.py) - 日志系统
+
+## 开发规范
+1. **代码组织** - 按功能模块分目录
+2. **配置管理** - 统一配置文件管理
+3. **日志记录** - 详细的调试和错误日志
+4. **错误处理** - 优雅的异常处理机制
+
+## 调试技巧
+- 查看 `logs/` 目录中的日志文件
+- 使用 `temp/` 目录存储临时调试文件
+- 利用配置文件切换调试模式
+- 使用分层测试方法定位问题
+
+## 部署准备
+- 检查 [README.md](mdc:README.md) 和 [README_INSTALL.md](mdc:README_INSTALL.md)
+- 确保所有依赖已正确安装
+- 验证配置文件和环境变量
+
+
+

@@ -6,6 +6,7 @@ Estia AI 应用核心
 import time
 import traceback
 import logging
+import asyncio
 from datetime import datetime
 import os
 
@@ -27,10 +28,48 @@ class EstiaApp:
         self.memory = None
         self.dialogue_engine = None
         self.is_initialized = False
+        self._async_initialized = False
         
         # 启动时预加载所有组件
         self._initialize_system()
         
+        # 尝试初始化异步组件
+        self._try_initialize_async()
+        
+    def _try_initialize_async(self):
+        """尝试初始化异步组件"""
+        try:
+            # 检查是否有运行的事件循环
+            loop = asyncio.get_running_loop()
+            if loop and not self._async_initialized:
+                # 创建异步初始化任务
+                asyncio.create_task(self._initialize_async_components())
+        except RuntimeError:
+            # 没有事件循环，稍后在需要时初始化
+            logger.debug("暂时没有事件循环，异步组件将在需要时初始化")
+    
+    async def _initialize_async_components(self):
+        """异步初始化组件"""
+        try:
+            if self.memory and not self._async_initialized:
+                if self.show_progress:
+                    print("⚡ 正在初始化异步评估器...")
+                
+                await self.memory.ensure_async_initialized()
+                self._async_initialized = True
+                
+                if self.show_progress:
+                    print("   ✅ 异步评估器就绪")
+                    
+                logger.info("异步组件初始化完成")
+        except Exception as e:
+            logger.error(f"异步组件初始化失败: {e}")
+    
+    async def ensure_fully_initialized(self):
+        """确保所有组件（包括异步组件）都已初始化"""
+        if not self._async_initialized:
+            await self._initialize_async_components()
+    
     def _initialize_system(self):
         """系统初始化 - 启动时预加载"""
         if self.show_progress:
@@ -133,25 +172,37 @@ class EstiaApp:
         
         try:
             # 使用记忆系统增强查询
+            self.logger.debug(f"开始处理查询: {query[:50]}...")
+            
             enhanced_context = self.memory.enhance_query(query, context)
+            enhance_time = time.time() - start_time
+            
+            self.logger.debug(f"记忆增强完成，耗时: {enhance_time*1000:.2f}ms，上下文长度: {len(enhanced_context)}")
             
             # 使用对话引擎生成回复
+            response_start = time.time()
             response = self.dialogue_engine.generate_response(query, enhanced_context)
+            response_time = time.time() - response_start
+            
+            self.logger.debug(f"对话生成完成，耗时: {response_time*1000:.2f}ms")
             
             # 异步存储对话记录（不阻塞响应）
             try:
                 self.memory.store_interaction(query, response, context)
+                self.logger.debug("对话记录已加入存储队列")
             except Exception as e:
                 self.logger.warning(f"存储对话记录失败: {e}")
                 # 存储失败不影响用户体验
             
-            response_time = time.time() - start_time
-            self.logger.debug(f"查询处理完成，耗时: {response_time*1000:.2f}ms")
+            total_time = time.time() - start_time
+            self.logger.debug(f"查询处理完成，总耗时: {total_time*1000:.2f}ms")
             
             return response
             
         except Exception as e:
             self.logger.error(f"查询处理失败: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
             return "抱歉，我遇到了一些问题，请稍后再试。"
     
     def start_voice_interaction(self):
@@ -180,6 +231,25 @@ class EstiaApp:
             
         self.logger.info("启动文本交互模式")
         
+        # 确保异步组件初始化
+        if not self._async_initialized:
+            print("⚡ 正在初始化异步评估器...")
+            try:
+                # 创建新的事件循环来初始化异步组件
+                import asyncio
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+                # 运行异步初始化
+                loop.run_until_complete(self._initialize_async_components())
+                loop.close()
+                
+                print("   ✅ 异步评估器就绪")
+            except Exception as e:
+                self.logger.error(f"异步组件初始化失败: {e}")
+                print(f"   ⚠️ 异步组件初始化失败: {e}")
+                print("   📝 将以基础模式运行（无记忆存储）")
+        
         print("\n💬 Estia 文本交互模式")
         print("💡 输入 'exit' 或 'quit' 退出")
         print("💡 输入 'help' 查看帮助")
@@ -205,6 +275,7 @@ class EstiaApp:
                     print("   • 直接输入问题与Estia对话")
                     print("   • 输入 'exit' 或 'quit' 退出")
                     print("   • 输入 'stats' 查看性能统计")
+                    print("   • 输入 'memory' 查看记忆统计")
                     continue
                 
                 if user_input.lower() in ["stats", "统计"]:
@@ -212,6 +283,18 @@ class EstiaApp:
                     print(f"   • 会话时长: {time.time() - session_start:.1f}秒")
                     print(f"   • 对话次数: {query_count}")
                     print(f"   • 平均响应: ~16ms")
+                    continue
+                
+                if user_input.lower() in ["memory", "记忆"]:
+                    if self.memory:
+                        stats = self.memory.get_memory_stats()
+                        print(f"\n🧠 记忆系统统计:")
+                        print(f"   • 总记忆数: {stats.get('total_memories', 0)}")
+                        print(f"   • 最近记忆: {stats.get('recent_memories', 0)}")
+                        print(f"   • 异步评估器: {'✅ 运行中' if stats.get('async_evaluator_running') else '❌ 未运行'}")
+                        print(f"   • 队列大小: {stats.get('queue_size', 0)}")
+                    else:
+                        print("\n❌ 记忆系统未初始化")
                     continue
                 
                 # 处理用户查询

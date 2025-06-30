@@ -5,7 +5,7 @@
 WHISPER_MODEL_ID = "openai/whisper-large-v3-turbo"
 
 # LLM 对话引擎配置
-# 模型提供商选择: "local", "openai", "deepseek"
+# 模型提供商选择: "local", "openai", "deepseek", "gemini"
 MODEL_PROVIDER = "deepseek"
 
 # 本地模型配置
@@ -20,9 +20,14 @@ OPENAI_API_BASE = "https://api.openai.com/v1"
 OPENAI_MODEL = "gpt-3.5-turbo"  # 可选: gpt-3.5-turbo, gpt-4, 等
 
 # DeepSeek API 配置（可选）
-DEEPSEEK_API_KEY = ""  # 如果使用DeepSeek，请填写您的API密钥
+DEEPSEEK_API_KEY = "sk-d29fae2aa41b44a287247222a7e09e8e"  # 如果使用DeepSeek，请填写您的API密钥
 DEEPSEEK_API_BASE = "https://api.deepseek.com"
 DEEPSEEK_MODEL = "deepseek-chat"  # 可根据实际可用模型调整
+
+# Gemini API 配置（可选）
+GEMINI_API_KEY = "AIzaSyBlYm6bik_y67Ay34mwiR3Ls_DppsOSRQM"  # 如果使用Gemini，请填写您的API密钥
+GEMINI_API_BASE = "https://gemini.estia.moe"
+GEMINI_MODEL = "gemini-2.5-pro"  # 使用官方支持的模型名称
 
 # 日志配置
 LOG_DIR = "./logs"

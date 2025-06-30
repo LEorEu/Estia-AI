@@ -10,11 +10,14 @@
 # 导入必要的库
 # -----------------------------------------------------------------------------
 
+import os
+# 预先设置环境变量来使用镜像站点
+os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+
 import requests                 # 导入 requests 库，用于发送 HTTP API 请求。
 import json                     # 导入 json 库，用于处理 JSON 数据格式。
 from config import settings     # 从我们的配置文件中导入 settings。
 import time                     # 导入 time 库，用于格式化时间戳。
-import os
 import logging
 
 # 设置日志
@@ -40,7 +43,7 @@ logger.addHandler(file_handler)
 logger.setLevel(getattr(settings, 'LOG_LEVEL', 'INFO'))
 
 # 根据配置决定是否导入OpenAI库
-if settings.MODEL_PROVIDER.lower() in ["openai", "deepseek"]:
+if settings.MODEL_PROVIDER.lower() in ["openai", "deepseek", "gemini"]:
     try:
         import openai
         logger.info(f"已加载OpenAI库，使用{settings.MODEL_PROVIDER}提供商")
@@ -146,6 +149,9 @@ class DialogueEngine:
             elif provider == "deepseek":
                 # 使用DeepSeek API
                 return self._call_deepseek_api(messages)
+            elif provider == "gemini":
+                # 使用Gemini API
+                return self._call_gemini_api(messages)
             else:
                 self.logger.error(f"未知的模型提供商: {provider}")
                 return "错误：未知的模型提供商配置。请检查settings.py中的MODEL_PROVIDER设置。"
@@ -215,7 +221,11 @@ class DialogueEngine:
         )
         
         # 提取回复文本
-        reply = response.choices[0].message.content.strip()
+        content = response.choices[0].message.content
+        if content is None:
+            self.logger.warning("OpenAI API返回了空回复")
+            return "抱歉，我无法生成回复。"
+        reply = content.strip()
         return reply
 
 
@@ -238,8 +248,150 @@ class DialogueEngine:
         )
 
         # 提取回复文本
-        reply = response.choices[0].message.content.strip()
+        content = response.choices[0].message.content
+        if content is None:
+            self.logger.warning("DeepSeek API返回了空回复")
+            return "抱歉，我无法生成回复。"
+        reply = content.strip()
         return reply
+
+    def _call_gemini_api(self, messages):
+        """调用Gemini API（使用原生格式）"""
+        if not hasattr(settings, 'GEMINI_API_KEY') or not settings.GEMINI_API_KEY:
+            raise ValueError("未配置Gemini API密钥。请在settings.py中设置GEMINI_API_KEY。")
+        
+        try:
+            # 转换OpenAI格式的messages到Gemini格式
+            gemini_contents = self._convert_messages_to_gemini_format(messages)
+            
+            # 构建Gemini API URL
+            model_name = getattr(settings, "GEMINI_MODEL", "gemini-2.5-pro")
+            api_base = getattr(settings, "GEMINI_API_BASE", "https://generativelanguage.googleapis.com")
+            
+            # 确保API基础URL格式正确
+            if not api_base.endswith('/'):
+                api_base += '/'
+            
+            url = f"{api_base}v1beta/models/{model_name}:generateContent"
+            
+            # 构建请求参数
+            params = {
+                "key": settings.GEMINI_API_KEY
+            }
+            
+            # 构建请求体
+            request_data = {
+                "contents": gemini_contents,
+                "generationConfig": {
+                    "temperature": getattr(settings, "LLM_TEMPERATURE", 0.7),
+                    "maxOutputTokens": getattr(settings, "LLM_MAX_NEW_TOKENS", 2048),  # 增加token限制
+                    "topP": 0.8,
+                    "topK": 10
+                }
+            }
+            
+            headers = {
+                "Content-Type": "application/json"
+            }
+            
+            self.logger.debug(f"Gemini API请求URL: {url}")
+            self.logger.debug(f"Gemini API请求数据: {json.dumps(request_data, ensure_ascii=False, indent=2)}")
+            
+            # 发送请求
+            response = requests.post(
+                url,
+                params=params,
+                json=request_data,
+                headers=headers,
+                timeout=60
+            )
+            
+            self.logger.debug(f"Gemini API响应状态: {response.status_code}")
+            
+            response.raise_for_status()
+            
+            result = response.json()
+            self.logger.debug(f"Gemini API响应: {json.dumps(result, ensure_ascii=False, indent=2)}")
+            
+            # 解析Gemini响应格式
+            if "candidates" not in result or not result["candidates"]:
+                self.logger.warning(f"Gemini API响应格式异常: {result}")
+                return "抱歉，我无法生成回复。"
+            
+            candidate = result["candidates"][0]
+            
+            # 检查是否因为达到token限制而截断
+            finish_reason = candidate.get("finishReason", "")
+            if finish_reason == "MAX_TOKENS":
+                self.logger.warning("Gemini API达到最大token限制，响应可能不完整")
+            
+            if "content" not in candidate:
+                self.logger.warning(f"Gemini API响应缺少content字段: {candidate}")
+                return "抱歉，我无法生成回复。"
+            
+            content_obj = candidate["content"]
+            
+            # 检查content结构
+            if "parts" not in content_obj:
+                self.logger.warning(f"Gemini API响应content缺少parts字段: {content_obj}")
+                # 尝试从其他可能的字段提取内容
+                if "text" in content_obj:
+                    content = content_obj["text"]
+                else:
+                    return "抱歉，我无法生成回复。"
+            else:
+                # 提取文本内容
+                parts = content_obj["parts"]
+                if not parts or "text" not in parts[0]:
+                    self.logger.warning("Gemini API返回了空内容")
+                    return "抱歉，我无法生成回复。"
+                content = parts[0]["text"]
+            
+            if content is None or content.strip() == "":
+                self.logger.warning("Gemini API返回了空回复")
+                return "抱歉，我无法生成回复。"
+            
+            reply = content.strip()
+            self.logger.debug(f"🤖 Gemini API回复: {reply}")
+            return reply
+            
+        except requests.RequestException as e:
+            self.logger.error(f"Gemini API请求失败: {e}")
+            if hasattr(e, 'response') and e.response is not None:
+                try:
+                    error_detail = e.response.json()
+                    self.logger.error(f"Gemini API错误详情: {error_detail}")
+                except:
+                    self.logger.error(f"Gemini API错误响应: {e.response.text}")
+            return f"抱歉，无法连接到Gemini服务。错误: {str(e)}"
+        except Exception as e:
+            self.logger.error(f"Gemini API调用异常: {e}")
+            return f"抱歉，处理请求时出现错误。错误: {str(e)}"
+    
+    def _convert_messages_to_gemini_format(self, messages):
+        """将OpenAI格式的messages转换为Gemini格式"""
+        gemini_contents = []
+        
+        for message in messages:
+            role = message.get("role", "user")
+            content = message.get("content", "")
+            
+            # Gemini的角色映射
+            if role == "system":
+                # 系统消息作为用户消息的前缀
+                gemini_role = "user"
+                content = f"[系统提示] {content}"
+            elif role == "assistant":
+                gemini_role = "model"
+            else:  # user
+                gemini_role = "user"
+            
+            gemini_contents.append({
+                "role": gemini_role,
+                "parts": [{"text": content}]
+            })
+        
+        return gemini_contents
 
 
 # -----------------------------------------------------------------------------
