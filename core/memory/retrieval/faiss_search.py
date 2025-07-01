@@ -70,6 +70,3 @@ class FAISSSearchEngine:
             return results
         except Exception as e:
             return []
-
-# 向后兼容别名
-FAISSRetriever = FAISSSearchEngine

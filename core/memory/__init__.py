@@ -25,12 +25,16 @@ Step 13: 自动关联
 - AsyncMemoryEvaluator: 异步评估处理
 """
 
-# 核心组件导入
-from .pipeline import MemoryPipeline
+# 核心组件导入 - 使用新的简化系统
+from .simple_pipeline import SimpleMemoryPipeline, create_simple_pipeline
+from .manager import EstiaMemoryManager, create_memory_manager
 
 # 导出核心组件
 __all__ = [
-    'MemoryPipeline'
+    'SimpleMemoryPipeline',
+    'create_simple_pipeline',
+    'EstiaMemoryManager', 
+    'create_memory_manager'
 ]
 
 # 版本信息
@@ -38,15 +42,15 @@ __version__ = '1.0.0'
 __author__ = 'Estia AI Team'
 __description__ = 'Estia AI记忆系统 - 智能记忆管理和上下文构建'
 
-# 便捷函数
+# 便捷函数 - 更新为新系统
 def create_memory_pipeline():
     """
-    创建记忆处理管道
+    创建记忆处理管道 (兼容性函数)
     
     返回:
-        MemoryPipeline实例
+        SimpleMemoryPipeline实例
     """
-    return MemoryPipeline()
+    return create_simple_pipeline(advanced=True)
 
 # 模块初始化日志
 import logging

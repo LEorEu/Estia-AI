@@ -43,7 +43,7 @@ logger.addHandler(file_handler)
 logger.setLevel(getattr(settings, 'LOG_LEVEL', 'INFO'))
 
 # 根据配置决定是否导入OpenAI库
-if settings.MODEL_PROVIDER.lower() in ["openai", "deepseek", "gemini"]:
+if settings.MODEL_PROVIDER.lower() in ["openai", "deepseek"]:
     try:
         import openai
         logger.info(f"已加载OpenAI库，使用{settings.MODEL_PROVIDER}提供商")
@@ -51,6 +51,12 @@ if settings.MODEL_PROVIDER.lower() in ["openai", "deepseek", "gemini"]:
         logger.error("未找到OpenAI库。请使用 'pip install openai' 安装")
         # 使用基本的requests库作为后备
 
+try:
+    import google.generativeai as genai
+    from google.api_core import client_options
+    logger.info("已加载 Google Generative AI SDK。")
+except ImportError:
+    logger.warning("未找到 Google Generative AI SDK。如果需要使用Gemini，请运行 'pip install google-generativeai'")
 
 # -----------------------------------------------------------------------------
 # 对话引擎类定义
@@ -255,143 +261,193 @@ class DialogueEngine:
         reply = content.strip()
         return reply
 
+    # ------------------ 以下是被完全修正的 Gemini 相关方法 ------------------
+
     def _call_gemini_api(self, messages):
-        """调用Gemini API（使用原生格式）"""
+        """调用Gemini API（使用官方SDK，稳定可靠）"""
         if not hasattr(settings, 'GEMINI_API_KEY') or not settings.GEMINI_API_KEY:
             raise ValueError("未配置Gemini API密钥。请在settings.py中设置GEMINI_API_KEY。")
-        
+
         try:
-            # 转换OpenAI格式的messages到Gemini格式
-            gemini_contents = self._convert_messages_to_gemini_format(messages)
+            # 关键步骤：处理代理配置
+            api_endpoint = None
+            if hasattr(settings, 'GEMINI_API_BASE') and settings.GEMINI_API_BASE:
+                from urllib.parse import urlparse
+                # 从完整的URL中提取主机名部分，例如 "gemini-proxy.yourdomain.com"
+                api_endpoint = urlparse(settings.GEMINI_API_BASE).netloc
             
-            # 构建Gemini API URL
-            model_name = getattr(settings, "GEMINI_MODEL", "gemini-2.5-pro")
-            api_base = getattr(settings, "GEMINI_API_BASE", "https://generativelanguage.googleapis.com")
+            client_opts = client_options.ClientOptions(api_endpoint=api_endpoint) if api_endpoint else None
             
-            # 确保API基础URL格式正确
-            if not api_base.endswith('/'):
-                api_base += '/'
-            
-            url = f"{api_base}v1beta/models/{model_name}:generateContent"
-            
-            # 构建请求参数
-            params = {
-                "key": settings.GEMINI_API_KEY
-            }
-            
-            # 构建请求体
-            request_data = {
-                "contents": gemini_contents,
-                "generationConfig": {
-                    "temperature": getattr(settings, "LLM_TEMPERATURE", 0.7),
-                    "maxOutputTokens": getattr(settings, "LLM_MAX_NEW_TOKENS", 2048),  # 增加token限制
-                    "topP": 0.8,
-                    "topK": 10
-                }
-            }
-            
-            headers = {
-                "Content-Type": "application/json"
-            }
-            
-            self.logger.debug(f"Gemini API请求URL: {url}")
-            self.logger.debug(f"Gemini API请求数据: {json.dumps(request_data, ensure_ascii=False, indent=2)}")
-            
-            # 发送请求
-            response = requests.post(
-                url,
-                params=params,
-                json=request_data,
-                headers=headers,
-                timeout=60
+            # 1. 配置API Key和客户端选项（包含代理）
+            genai.configure(
+                api_key=settings.GEMINI_API_KEY,
+                transport="rest", # 明确使用rest传输以应用代理
+                client_options=client_opts
             )
             
-            self.logger.debug(f"Gemini API响应状态: {response.status_code}")
+            # 2. 转换消息格式 (调用下面已修正的辅助函数)
+            system_instruction, gemini_contents = self._convert_messages_to_gemini_format(messages)
+
+            # 3. 设置生成参数
+            generation_config = genai.types.GenerationConfig(
+                temperature=getattr(settings, "LLM_TEMPERATURE", 0.7),
+                max_output_tokens=getattr(settings, "LLM_MAX_NEW_TOKENS", 2048),
+                top_p=0.8,
+                top_k=10
+            )
             
-            response.raise_for_status()
+            # 4. 设置安全设置
+            safety_settings = [
+                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+            ]
+
+            # 5. 初始化模型
+            model = genai.GenerativeModel(
+                model_name=getattr(settings, "GEMINI_MODEL", "gemini-2.5-pro"),
+                generation_config=generation_config,
+                system_instruction=system_instruction,
+                safety_settings=safety_settings
+            )
+
+            self.logger.debug(f"Gemini SDK 请求内容: {gemini_contents}")
             
-            result = response.json()
-            self.logger.debug(f"Gemini API响应: {json.dumps(result, ensure_ascii=False, indent=2)}")
+            # 6. 发送请求
+            response = model.generate_content(gemini_contents)
             
-            # 解析Gemini响应格式
-            if "candidates" not in result or not result["candidates"]:
-                self.logger.warning(f"Gemini API响应格式异常: {result}")
+            # 添加详细的响应调试信息
+            self.logger.debug(f"Gemini API 响应对象类型: {type(response)}")
+            self.logger.debug(f"Gemini API 响应属性: {dir(response)}")
+            
+            # 7. 解析响应 - 改进版本
+            # 首先检查是否有候选响应
+            candidates = getattr(response, 'candidates', [])
+            if not candidates:
+                self.logger.warning("Gemini API 没有返回任何候选响应")
                 return "抱歉，我无法生成回复。"
             
-            candidate = result["candidates"][0]
+            # 获取第一个候选响应
+            candidate = candidates[0]
+            candidate_finish_reason = getattr(candidate, 'finish_reason', None)
             
-            # 检查是否因为达到token限制而截断
-            finish_reason = candidate.get("finishReason", "")
-            if finish_reason == "MAX_TOKENS":
-                self.logger.warning("Gemini API达到最大token限制，响应可能不完整")
-            
-            if "content" not in candidate:
-                self.logger.warning(f"Gemini API响应缺少content字段: {candidate}")
-                return "抱歉，我无法生成回复。"
-            
-            content_obj = candidate["content"]
-            
-            # 检查content结构
-            if "parts" not in content_obj:
-                self.logger.warning(f"Gemini API响应content缺少parts字段: {content_obj}")
-                # 尝试从其他可能的字段提取内容
-                if "text" in content_obj:
-                    content = content_obj["text"]
+            # 检查finish_reason
+            if candidate_finish_reason:
+                self.logger.debug(f"Candidate finish reason: {candidate_finish_reason}")
+                
+                # 根据finish_reason处理不同情况
+                if candidate_finish_reason == 1:  # STOP - 正常完成
+                    pass  # 继续处理
+                elif candidate_finish_reason == 2:  # MAX_TOKENS
+                    self.logger.warning("Gemini API达到最大token限制")
+                    return "回复内容过长，已被截断。请尝试更简洁的问题。"
+                elif candidate_finish_reason == 3:  # SAFETY
+                    self.logger.warning("Gemini API因安全策略阻止")
+                    return "抱歉，由于安全策略限制，我无法回复这个问题。请尝试换个话题。"
+                elif candidate_finish_reason == 4:  # RECITATION
+                    self.logger.warning("Gemini API因版权问题阻止")
+                    return "抱歉，这个问题可能涉及版权内容，我无法回复。"
                 else:
-                    return "抱歉，我无法生成回复。"
-            else:
-                # 提取文本内容
-                parts = content_obj["parts"]
-                if not parts or "text" not in parts[0]:
-                    self.logger.warning("Gemini API返回了空内容")
-                    return "抱歉，我无法生成回复。"
-                content = parts[0]["text"]
+                    self.logger.warning(f"未知的finish_reason: {candidate_finish_reason}")
+                    return f"抱歉，我暂时无法生成回复。(原因码: {candidate_finish_reason})"
             
-            if content is None or content.strip() == "":
-                self.logger.warning("Gemini API返回了空回复")
-                return "抱歉，我无法生成回复。"
-            
-            reply = content.strip()
-            self.logger.debug(f"🤖 Gemini API回复: {reply}")
-            return reply
-            
-        except requests.RequestException as e:
-            self.logger.error(f"Gemini API请求失败: {e}")
-            if hasattr(e, 'response') and e.response is not None:
-                try:
-                    error_detail = e.response.json()
-                    self.logger.error(f"Gemini API错误详情: {error_detail}")
-                except:
-                    self.logger.error(f"Gemini API错误响应: {e.response.text}")
-            return f"抱歉，无法连接到Gemini服务。错误: {str(e)}"
+            # 检查响应内容
+            if not response.parts:
+                # 检查具体的失败原因
+                finish_reason = getattr(response, 'finish_reason', 'UNKNOWN')
+                prompt_feedback = getattr(response, 'prompt_feedback', {})
+                
+                # 添加更多调试信息
+                self.logger.warning(f"Gemini API 返回了空内容")
+                self.logger.warning(f"Finish Reason: {finish_reason}")
+                self.logger.warning(f"Prompt Feedback: {prompt_feedback}")
+                self.logger.warning(f"Response candidates: {getattr(response, 'candidates', [])}")
+                self.logger.warning(f"Response text: {getattr(response, 'text', 'N/A')}")
+                
+                # 尝试从candidates中获取信息
+                candidates = getattr(response, 'candidates', [])
+                if candidates:
+                    candidate = candidates[0]
+                    self.logger.warning(f"First candidate: {candidate}")
+                    candidate_finish_reason = getattr(candidate, 'finish_reason', 'UNKNOWN')
+                    self.logger.warning(f"Candidate finish reason: {candidate_finish_reason}")
+                
+                # 根据具体原因返回不同的错误信息
+                if finish_reason == 'SAFETY':
+                    return "抱歉，由于安全策略限制，我无法回复这个问题。请尝试换个话题。"
+                elif finish_reason == 'MAX_TOKENS':
+                    return "回复内容过长，已被截断。请尝试更简洁的问题。"
+                elif finish_reason == 'RECITATION':
+                    return "抱歉，这个问题可能涉及版权内容，我无法回复。"
+                else:
+                    return f"抱歉，我暂时无法生成回复。(原因: {finish_reason})"
+                
+            # 安全地获取响应文本
+            try:
+                reply = response.text.strip()
+                if not reply:
+                    self.logger.warning("Gemini API返回了空文本")
+                    return "抱歉，我无法生成有效的回复。"
+                    
+                self.logger.debug(f"🤖 Gemini API 回复: {reply}")
+                return reply
+            except Exception as text_error:
+                self.logger.error(f"获取响应文本时出错: {text_error}")
+                return "抱歉，处理回复时出现错误。"
+
         except Exception as e:
-            self.logger.error(f"Gemini API调用异常: {e}")
-            return f"抱歉，处理请求时出现错误。错误: {str(e)}"
+            self.logger.error(f"Gemini SDK 调用异常: {e}")
+            return f"抱歉，处理Gemini请求时出现错误: {str(e)}"
     
     def _convert_messages_to_gemini_format(self, messages):
-        """将OpenAI格式的messages转换为Gemini格式"""
+        """
+        [已修正] 将OpenAI格式的消息列表转换为Gemini SDK所需的格式。
+        - 提取 system 指令。
+        - 确保 user/model 角色交替。
+        - 合并连续的同角色消息。
+        """
+        system_instruction = None
         gemini_contents = []
         
-        for message in messages:
-            role = message.get("role", "user")
-            content = message.get("content", "")
-            
-            # Gemini的角色映射
-            if role == "system":
-                # 系统消息作为用户消息的前缀
-                gemini_role = "user"
-                content = f"[系统提示] {content}"
-            elif role == "assistant":
-                gemini_role = "model"
-            else:  # user
-                gemini_role = "user"
-            
-            gemini_contents.append({
-                "role": gemini_role,
-                "parts": [{"text": content}]
-            })
+        if not messages:
+            return None, []
+
+        # 1. 提取 system 指令 (通常是列表中的第一条)
+        if messages[0]['role'] == 'system':
+            system_instruction = messages[0]['content']
+            messages = messages[1:]
+
+        if not messages:
+            return system_instruction, []
+
+        # 2. 合并连续的同角色消息，避免API报错
+        merged_messages = []
+        current_role = messages[0]['role']
+        current_content = [messages[0]['content']]
+
+        for msg in messages[1:]:
+            if msg['role'] == current_role:
+                current_content.append(msg['content'])
+            else:
+                merged_messages.append({'role': current_role, 'content': "\n".join(current_content)})
+                current_role = msg['role']
+                current_content = [msg['content']]
+        merged_messages.append({'role': current_role, 'content': "\n".join(current_content)})
         
-        return gemini_contents
+        # 3. 转换为Gemini格式，并确保角色交替
+        for msg in merged_messages:
+            # 角色映射: assistant -> model
+            role = 'model' if msg['role'] == 'assistant' else 'user'
+            
+            # 保证历史记录以 user 开头，且 user/model 交替
+            if role == 'user' or (role == 'model' and len(gemini_contents) > 0 and gemini_contents[-1]['role'] == 'user'):
+                gemini_contents.append({'role': role, 'parts': [msg['content']]})
+            else:
+                # 如果出现不规范的开头(如model)或连续的model角色，则记录并跳过，以防API报错
+                self.logger.warning(f"丢弃了格式不正确的对话历史部分: {msg}")
+
+        return system_instruction, gemini_contents
 
 
 # -----------------------------------------------------------------------------

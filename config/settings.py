@@ -8,12 +8,12 @@ WHISPER_MODEL_ID = "openai/whisper-large-v3-turbo"
 
 # LLM 对话引擎配置
 # 模型提供商选择: "local", "openai", "deepseek", "gemini"
-MODEL_PROVIDER = "deepseek"
+MODEL_PROVIDER = "gemini"
 
 # 本地模型配置
 LLM_API_URL = "http://127.0.0.1:8080/v1/chat/completions" 
 LLM_MODEL = "local-model"  # 本地模型标识符，用于log
-LLM_MAX_NEW_TOKENS = 1024   # 给予AI足够的发挥空间，确保回答完整
+LLM_MAX_NEW_TOKENS = 4096   # 给予AI足够的发挥空间，确保回答完整
 LLM_TEMPERATURE = 0.8       # 保证逻辑性的同时，带有一点自然的创造力
 
 # API密钥配置 - 从本地配置文件或环境变量加载

@@ -29,9 +29,6 @@ logs/
 .idea/
 .DS_Store
 
-.cursor/
-.mdc
-
 # 忽略任何可能的敏感信息文件（非常重要！）
 # 建议未来把API Key等信息写在 secrets.py 中，并把这个文件加入忽略列表
 config/secrets.py
