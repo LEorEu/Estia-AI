@@ -93,15 +93,48 @@ class TextVectorizer:
     def _load_sentence_transformers(self) -> None:
         """加载sentence-transformers模型"""
         try:
+            # 🔥 强制离线模式 - 优先使用本地缓存
+            # 设置环境变量禁用网络检查
+            os.environ["HF_HUB_OFFLINE"] = "1"  # 强制离线模式
+            os.environ["TRANSFORMERS_OFFLINE"] = "1"  # transformers离线模式
+            os.environ["HF_DATASETS_OFFLINE"] = "1"  # datasets离线模式
+            
+            # 设置镜像源（用于必要时的下载）
+            os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+            
             from sentence_transformers import SentenceTransformer
             
-            # 加载模型
-            logger.info(f"加载sentence-transformers模型: {self.model_name}")
-            self.model = SentenceTransformer(self.model_name, device=self.device)
+            # 先尝试完全离线加载
+            try:
+                logger.info(f"🔄 尝试离线加载模型: {self.model_name}")
+                self.model = SentenceTransformer(
+                    self.model_name, 
+                    device=self.device,
+                    cache_folder="cache"  # 明确指定缓存目录
+                )
+                logger.info("✅ 离线模式加载成功")
+                
+            except Exception as offline_error:
+                logger.warning(f"离线加载失败: {offline_error}")
+                logger.info("🌐 切换到在线模式...")
+                
+                # 如果离线失败，清除离线设置，允许联网
+                if "HF_HUB_OFFLINE" in os.environ:
+                    del os.environ["HF_HUB_OFFLINE"]
+                if "TRANSFORMERS_OFFLINE" in os.environ:
+                    del os.environ["TRANSFORMERS_OFFLINE"]
+                
+                # 重新尝试加载
+                self.model = SentenceTransformer(
+                    self.model_name, 
+                    device=self.device,
+                    cache_folder="cache"
+                )
+                logger.info("✅ 在线模式加载成功")
             
             # 获取向量维度
             self.vector_dim = self.model.get_sentence_embedding_dimension()
-            logger.info(f"模型加载成功，向量维度: {self.vector_dim}")
+            logger.info(f"模型初始化完成，向量维度: {self.vector_dim}")
             
         except ImportError:
             logger.error("未找到sentence-transformers库，请安装: pip install sentence-transformers")

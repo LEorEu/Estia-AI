@@ -250,21 +250,27 @@ class AsyncMemoryEvaluator:
                 self.logger.warning("数据库管理器未初始化，跳过保存")
                 return
             
-            # 保存用户消息
+            # 步骤1: 创建或更新memory_group记录
+            await self._create_or_update_memory_group(evaluation)
+            
+            # 步骤2: 保存用户消息
             user_memory_id = await self._save_single_memory(
                 content=dialogue_data['user_input'],
                 role="user",
                 evaluation=evaluation
             )
             
-            # 保存AI回复
+            # 步骤3: 保存AI回复
             ai_memory_id = await self._save_single_memory(
                 content=dialogue_data['ai_response'],
                 role="assistant", 
                 evaluation=evaluation
             )
             
-            self.logger.info(f"评估结果已保存: 用户记忆 {user_memory_id}, AI记忆 {ai_memory_id}")
+            # 步骤4: 更新分组统计信息
+            await self._update_group_statistics(evaluation['group_id'])
+            
+            self.logger.info(f"评估结果已保存: 用户记忆 {user_memory_id}, AI记忆 {ai_memory_id}, 分组: {evaluation['group_id']}")
             
         except Exception as e:
             self.logger.error(f"保存评估结果失败: {e}")
@@ -319,6 +325,193 @@ class AsyncMemoryEvaluator:
             self.db_manager.conn.commit()
         
         return memory_id
+    
+    async def _create_or_update_memory_group(self, evaluation: Dict[str, Any]):
+        """
+        创建或更新memory_group记录
+        
+        参数:
+            evaluation: 评估结果，包含group_id, super_group, summary等
+        """
+        try:
+            if not self.db_manager:
+                return
+            
+            group_id = evaluation['group_id']
+            
+            # 检查分组是否已存在
+            existing_group = self.db_manager.query(
+                "SELECT group_id, time_start, time_end, summary FROM memory_group WHERE group_id = ?",
+                (group_id,)
+            )
+            
+            if existing_group:
+                # 更新现有分组
+                await self._update_existing_group(group_id, evaluation)
+                self.logger.debug(f"更新现有分组: {group_id}")
+            else:
+                # 创建新分组
+                await self._create_new_group(evaluation)
+                self.logger.debug(f"创建新分组: {group_id}")
+                
+        except Exception as e:
+            self.logger.error(f"创建/更新分组失败: {e}")
+    
+    async def _create_new_group(self, evaluation: Dict[str, Any]):
+        """
+        创建新的memory_group记录
+        
+        参数:
+            evaluation: 评估结果
+        """
+        try:
+            # 生成话题描述
+            topic = await self._generate_topic_description(evaluation)
+            
+            # 插入新分组记录
+            self.db_manager.execute_query(
+                """
+                INSERT INTO memory_group 
+                (group_id, super_group, topic, time_start, time_end, summary, score)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    evaluation['group_id'],
+                    evaluation['super_group'],
+                    topic,
+                    evaluation['timestamp'],  # 设置开始时间为当前对话时间
+                    evaluation['timestamp'],  # 暂时设置结束时间也为当前时间
+                    evaluation['summary'],
+                    evaluation['weight']
+                )
+            )
+            
+            # 提交事务
+            if self.db_manager.conn:
+                self.db_manager.conn.commit()
+            
+            self.logger.info(f"✅ 创建新话题分组: {evaluation['group_id']} - {topic}")
+            
+        except Exception as e:
+            self.logger.error(f"创建新分组失败: {e}")
+    
+    async def _update_existing_group(self, group_id: str, evaluation: Dict[str, Any]):
+        """
+        更新现有的memory_group记录
+        
+        参数:
+            group_id: 分组ID
+            evaluation: 新的评估结果
+        """
+        try:
+            # 更新时间范围和摘要
+            self.db_manager.execute_query(
+                """
+                UPDATE memory_group 
+                SET time_end = ?, 
+                    summary = CASE 
+                        WHEN LENGTH(summary) < LENGTH(?) THEN ?
+                        ELSE summary 
+                    END,
+                    score = (score + ?) / 2.0
+                WHERE group_id = ?
+                """,
+                (
+                    evaluation['timestamp'],  # 更新结束时间
+                    evaluation['summary'],    # 比较摘要长度
+                    evaluation['summary'],    # 如果新摘要更长，则使用新摘要
+                    evaluation['weight'],     # 平均分数
+                    group_id
+                )
+            )
+            
+            # 提交事务
+            if self.db_manager.conn:
+                self.db_manager.conn.commit()
+            
+            self.logger.debug(f"更新分组时间范围: {group_id}")
+            
+        except Exception as e:
+            self.logger.error(f"更新现有分组失败: {e}")
+    
+    async def _generate_topic_description(self, evaluation: Dict[str, Any]) -> str:
+        """
+        生成话题描述
+        
+        参数:
+            evaluation: 评估结果
+            
+        返回:
+            话题描述字符串
+        """
+        try:
+            # 基于super_group和summary生成描述
+            super_group = evaluation.get('super_group', '未分类')
+            summary = evaluation.get('summary', '')
+            
+            # 简单的话题描述生成逻辑
+            if summary:
+                # 提取摘要的前50个字符作为话题
+                topic = summary[:50].strip()
+                if len(summary) > 50:
+                    topic += "..."
+            else:
+                # 如果没有摘要，使用super_group
+                topic = f"{super_group}相关讨论"
+            
+            return topic
+            
+        except Exception as e:
+            self.logger.error(f"生成话题描述失败: {e}")
+            return evaluation.get('super_group', '未知话题')
+    
+    async def _update_group_statistics(self, group_id: str):
+        """
+        更新分组统计信息
+        
+        参数:
+            group_id: 分组ID
+        """
+        try:
+            if not self.db_manager:
+                return
+            
+            # 获取该分组下的所有记忆统计
+            stats = self.db_manager.query(
+                """
+                SELECT COUNT(*) as memory_count,
+                       AVG(weight) as avg_weight,
+                       MIN(timestamp) as earliest_time,
+                       MAX(timestamp) as latest_time
+                FROM memories 
+                WHERE group_id = ?
+                """,
+                (group_id,)
+            )
+            
+            if stats and stats[0]:
+                memory_count, avg_weight, earliest_time, latest_time = stats[0]
+                
+                # 更新分组的统计信息
+                self.db_manager.execute_query(
+                    """
+                    UPDATE memory_group 
+                    SET time_start = ?,
+                        time_end = ?,
+                        score = ?
+                    WHERE group_id = ?
+                    """,
+                    (earliest_time, latest_time, avg_weight or 1.0, group_id)
+                )
+                
+                # 提交事务
+                if self.db_manager.conn:
+                    self.db_manager.conn.commit()
+                
+                self.logger.debug(f"更新分组统计: {group_id}, 记忆数: {memory_count}, 平均权重: {avg_weight:.2f}")
+            
+        except Exception as e:
+            self.logger.error(f"更新分组统计失败: {e}")
     
     async def _create_auto_associations(self, dialogue_data: Dict[str, Any], 
                                       evaluation: Dict[str, Any]):

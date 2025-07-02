@@ -314,9 +314,18 @@ class DatabaseManager:
             else:
                 self.cursor.execute(query)
                 
+            # 🔥 关键修复：如果是写入操作，立即提交事务
+            query_upper = query.strip().upper()
+            if query_upper.startswith(('INSERT', 'UPDATE', 'DELETE', 'CREATE', 'DROP', 'ALTER')):
+                self.conn.commit()
+                logger.debug("数据库写入操作已提交")
+                
             return self.cursor.fetchall()
         except Exception as e:
             logger.error(f"执行查询失败: {e}")
+            if self.conn and query.strip().upper().startswith(('INSERT', 'UPDATE', 'DELETE')):
+                self.conn.rollback()
+                logger.debug("数据库操作已回滚")
             return None
     
     def query(self, query_sql, params=None):

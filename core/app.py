@@ -13,7 +13,7 @@ import os
 from config import settings
 from core.dialogue.engine import DialogueEngine
 from core.audio import start_keyboard_controller
-from core.memory import create_simple_pipeline
+from core.memory import create_memory_system
 
 # 设置日志
 logger = logging.getLogger("estia.app")
@@ -87,14 +87,14 @@ class EstiaApp:
                 print("   🔤 加载向量化模型（Qwen3-Embedding-0.6B）...")
             
             step_start = time.time()
-            self.memory = create_simple_pipeline(advanced=True)  # 启用所有高级功能
+            self.memory = create_memory_system(enable_advanced=True)  # 🔥 使用新的统一记忆系统
             step_time = time.time() - step_start
             
             if self.show_progress:
-                print(f"   ✅ 简化记忆系统就绪 ({step_time:.2f}s)")
-                print("   🎯 分层架构: Core/Active/Archive/Temp")
-                print("   ⚡ 性能优化: 简洁高效")
-            self.logger.info(f"简化记忆系统初始化完成，耗时: {step_time:.2f}s")
+                print(f"   ✅ Estia记忆系统就绪 ({step_time:.2f}s)")
+                print("   🎯 完整13步工作流程: 智能检索+异步评估")
+                print("   ⚡ 性能优化: 高级功能全开")
+            self.logger.info(f"Estia记忆系统初始化完成，耗时: {step_time:.2f}s")
             
             # Step 2: 初始化对话引擎
             if self.show_progress:
@@ -125,13 +125,13 @@ class EstiaApp:
             
             if self.show_progress:
                 print("="*60)
-                print(f"🎉 Estia AI助手启动完成！(增强版记忆系统)")
+                print(f"🎉 Estia AI助手启动完成！(完整13步记忆系统)")
                 print(f"⚡ 总启动时间: {total_time:.2f}秒")
-                print(f"💡 后续对话响应时间: ~8ms（超实时响应）")
-                print(f"🧠 记忆架构: 智能分层 + 精准检索")
+                print(f"💡 查询增强时间: <100ms | 完整对话: <500ms")
+                print(f"🧠 记忆架构: 向量检索 + 关联网络 + 异步评估")
                 print("="*60)
             
-            self.logger.info(f"Estia系统初始化完成（增强版），总耗时: {total_time:.2f}s")
+            self.logger.info(f"Estia系统初始化完成（完整版），总耗时: {total_time:.2f}s")
             
         except Exception as e:
             self.logger.error(f"系统初始化失败: {e}")
@@ -291,33 +291,46 @@ class EstiaApp:
                 
                 if user_input.lower() in ["memory", "记忆"]:
                     if self.memory:
-                        stats = self.memory.get_memory_stats()
-                        print(f"\n🧠 增强版记忆系统统计:")
+                        stats = self.memory.get_system_stats()
+                        print(f"\n🧠 Estia记忆系统统计:")
                         print(f"   • 总记忆数: {stats.get('total_memories', 0)}")
                         
-                        # 显示分层统计
-                        layers = stats.get('layers', {})
-                        if layers:
-                            print(f"   📊 分层架构:")
-                            for layer_name, layer_info in layers.items():
-                                count = layer_info.get('count', 0)
-                                capacity = layer_info.get('capacity', 0)
-                                utilization = layer_info.get('utilization', 0)
-                                print(f"     • {layer_name}层: {count}/{capacity} (利用率: {utilization:.1%})")
+                        # 显示组件状态
+                        components = stats.get('components', {})
+                        if components:
+                            print(f"   🔧 核心组件:")
+                            component_names = {
+                                'db_manager': '数据库管理器',
+                                'vectorizer': '向量化器',
+                                'faiss_search': 'FAISS检索',
+                                'association': '关联网络',
+                                'history': '历史检索器',
+                                'storage': '记忆存储',
+                                'scorer': '记忆评分器',
+                                'async_evaluator': '异步评估器'
+                            }
+                            for comp_key, comp_name in component_names.items():
+                                status = "✅" if components.get(comp_key) else "❌"
+                                print(f"     {status} {comp_name}")
                         
-                        # 显示系统状态
+                        # 显示系统特性
                         enhanced_features = [
-                            "✅ 分层记忆架构",
-                            "✅ 智能权重分配", 
-                            "✅ 精准语义检索",
-                            "✅ 数据库集成" if stats.get('database_connected') else "❌ 数据库离线",
-                            "✅ 异步评估支持" if stats.get('async_evaluator_running') else "✅ 同步模式"
+                            "✅ 13步完整工作流程",
+                            "✅ 向量语义检索", 
+                            "✅ 多跳关联网络",
+                            "✅ 数据库持久化" if stats.get('initialized') else "❌ 系统未初始化",
+                            "✅ 异步评估处理" if stats.get('async_evaluator_running') else "⏳ 异步评估待启动"
                         ]
                         print(f"   🚀 系统特性:")
                         for feature in enhanced_features:
                             print(f"     {feature}")
                             
-                        print(f"   ⚡ 性能优化: 87.2%内容精简度")
+                        # 异步队列状态
+                        async_queue = stats.get('async_queue', {})
+                        if async_queue:
+                            print(f"   📝 异步评估队列: {async_queue.get('status', '未知')}")
+                            
+                        print(f"   ⚡ 高级功能: {'启用' if stats.get('advanced_features') else '禁用'}")
                     else:
                         print("\n❌ 记忆系统未初始化")
                     continue

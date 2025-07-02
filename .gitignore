@@ -86,6 +86,9 @@ old_system/
 llama/models/
 models/*.bin
 models/*.safetensors
+cache/
+summer/
+
 
 # 新的配置文件保护
 config/api_keys.py

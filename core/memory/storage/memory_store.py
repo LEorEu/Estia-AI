@@ -261,6 +261,93 @@ class MemoryStore:
             logger.error(traceback.format_exc())
             return None
     
+    def add_interaction_memory(self, content: str, memory_type: str, role: str,
+                              session_id: str, timestamp: float, weight: float = 5.0) -> Optional[str]:
+        """
+        添加交互记忆（兼容EstiaMemorySystem接口）
+        
+        参数:
+            content: 记忆内容
+            memory_type: 记忆类型（user_input, assistant_reply等）
+            role: 角色（user, assistant, system）
+            session_id: 会话ID
+            timestamp: 时间戳
+            weight: 权重
+            
+        返回:
+            Optional[str]: 记忆ID，失败时返回None
+        """
+        if not content.strip():
+            logger.warning("记忆内容为空，不添加")
+            return None
+            
+        if self.db_manager is None:
+            logger.error("数据库管理器未初始化，无法添加记忆")
+            return None
+            
+        try:
+            # 生成记忆ID
+            memory_id = f"mem_{uuid.uuid4().hex[:12]}"
+            
+            # 准备元数据
+            metadata = {
+                "session_id": session_id,
+                "memory_type": memory_type,
+                "role": role
+            }
+            metadata_json = json.dumps(metadata, ensure_ascii=False)
+            
+            # 存储到数据库
+            self.db_manager.execute_query(
+                """
+                INSERT INTO memories 
+                (id, content, type, role, session_id, timestamp, weight, last_accessed, metadata)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (memory_id, content, memory_type, role, session_id, timestamp, weight, timestamp, metadata_json)
+            )
+            
+            # 提交事务
+            if self.db_manager.conn:
+                self.db_manager.conn.commit()
+            
+            # 向量化和索引（异步进行，避免阻塞）
+            try:
+                vector = self._vectorize_text(content)
+                if vector is not None:
+                    # 存储向量到数据库
+                    vector_id = f"vec_{memory_id}"
+                    vector_blob = vector.tobytes()
+                    
+                    self.db_manager.execute_query(
+                        """
+                        INSERT INTO memory_vectors
+                        (id, memory_id, vector, model_name, timestamp)
+                        VALUES (?, ?, ?, ?, ?)
+                        """,
+                        (vector_id, memory_id, vector_blob, 
+                         f"{self.vectorizer.model_type}/{self.vectorizer.model_name}" if self.vectorizer else "unknown", 
+                         timestamp)
+                    )
+                    
+                    # 添加到FAISS索引
+                    if self.vector_index and self.vector_index.available:
+                        success = self.vector_index.add_vectors(
+                            vectors=vector.reshape(1, -1),
+                            ids=[memory_id]
+                        )
+                        if success:
+                            self.vector_index.save_index()
+            except Exception as e:
+                logger.warning(f"向量化处理失败，但记忆已保存: {e}")
+            
+            logger.debug(f"✅ 交互记忆存储成功: {memory_id}")
+            return memory_id
+            
+        except Exception as e:
+            logger.error(f"交互记忆存储失败: {e}")
+            return None
+    
     def _vectorize_text(self, text: str) -> np.ndarray:
         """
         将文本向量化
@@ -539,6 +626,55 @@ class MemoryStore:
             
         except Exception as e:
             logger.error(f"获取最近记忆失败: {e}")
+            return []
+    
+    def get_memories_by_ids(self, memory_ids: List[str]) -> List[Dict[str, Any]]:
+        """
+        根据ID列表批量获取记忆（兼容EstiaMemorySystem接口）
+        
+        参数:
+            memory_ids: 记忆ID列表
+            
+        返回:
+            List[Dict[str, Any]]: 记忆列表
+        """
+        if not memory_ids or not self.db_manager:
+            return []
+        
+        try:
+            placeholders = ','.join(['?' for _ in memory_ids])
+            results = self.db_manager.query(f"""
+                SELECT id, content, type, role, session_id, timestamp, weight, group_id, summary, metadata
+                FROM memories WHERE id IN ({placeholders})
+                ORDER BY timestamp DESC
+            """, memory_ids)
+            
+            memories = []
+            for row in results:
+                # 解析元数据
+                try:
+                    metadata = json.loads(row[9]) if row[9] else {}
+                except:
+                    metadata = {}
+                
+                memories.append({
+                    'memory_id': row[0],
+                    'content': row[1], 
+                    'type': row[2],
+                    'role': row[3],
+                    'session_id': row[4] or "",
+                    'timestamp': row[5],
+                    'weight': row[6] or 5.0,
+                    'group_id': row[7] or "",
+                    'summary': row[8] or "",
+                    'metadata': metadata
+                })
+            
+            logger.debug(f"批量获取 {len(memories)} 条记忆")
+            return memories
+            
+        except Exception as e:
+            logger.error(f"批量获取记忆失败: {e}")
             return []
     
     def add_association(self, source_id: str, target_id: str, 
