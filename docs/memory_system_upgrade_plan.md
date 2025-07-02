@@ -314,3 +314,52 @@ class EmotionAwareModule:
 | 个性化学习 | 用户满意度 | +40% |
 | 主题聚类 | 记忆组织效率 | +60% |
 | 情感感知 | 对话自然度 | +30% |
+
+## 📈 渐进式融合实施路线（v2.0a）
+> 目标：在保留现有 13 步流程与数据表的前提下，引入分层标签、热缓存和批处理，逐步逼近 v2.0 性能指标，避免一次性 40 % 大重构带来的高风险。
+
+### Step 0 （D0–D2）Schema 升级
+1. `ALTER TABLE memories ADD COLUMN level TEXT DEFAULT 'short_term';`
+2. 编写 `migrations/backfill_level.py` 脚本：
+   * `core` ↔ weight ≥ 9 或 metadata.flag=="core"
+   * `active` ↔ 6 ≤ weight < 9 且最近 30 天访问
+   * 其余标记为 `short_term`
+3. 更新 `MemoryStore.add_interaction_memory()` 给新纪录自动打 level 标签。
+
+### Step 1 （Week 1）检索层简化 + L1/L2 缓存
+| 组件 | 任务 | 预期收益 |
+|------|------|----------|
+| `CacheManager` | 新增 `L1MemoryCache`（LRU in-mem, 256 条）<br/>新增 `L2MemoryCache`（sqlite :memory: 镜像, 2048 条） | 热点查询 → 10 ms 内返回 |
+| `SmartRetriever` | 查询顺序：L1 → L2 → 现有检索链 | 命中率 60 % |
+| 监控 | 在 `get_system_stats()` 输出各级 cache hit | 可观测性 |
+
+### Step 2 （Week 2）批处理接口
+1. `MemoryStore.batch_add(memories: List[Dict])`（单事务、批量向量化）。
+2. `UnifiedRetriever.batch_retrieve(queries: List[str])` 并行向量检索 → 共享 Index 锁。
+3. SmartRetriever 若检测到会话窗口内多条 user message，自动走 batch 路径。
+
+### Step 3 （Week 3）分层可视化与策略落地
+| Level | 特殊策略 |
+|-------|----------|
+| core | 启动时预加载至 L1；Token 截断永不丢弃 | 
+| active | 保留至 L2；30 天未访问降级为 archive | 
+| short_term | 7 天定期压缩为摘要或删除 | 
+| archive | 只在深度处理轨道检索 | 
+
+### Step 4 （Week 4）深度处理轨道改造（增量）
+1. 复用现有 `AsyncMemoryEvaluator` 线程池，引入任务类型：
+   * `AUTO_ARCHIVE` – level 降级逻辑
+   * `WEIGHT_DECAY` – 批量衰减
+2. 引入 `metrics/prometheus.py`，将检索延迟、cache hit、LLM 花费暴露为 Prometheus 指标。
+
+### Step 5 （Week 5–6）性能验证 & 决策点
+* **验收指标**：
+  * 平均检索延迟 < 50 ms
+  * Core/Active 命中率 > 80 %
+  * 系统响应 < 120 ms（P95）
+* 若指标达标，则保留 "v2.0a" 渐进路线；
+* 若仍不足，再评估是否进入完整版 v2.0 大重构。
+
+---
+
+> **备注**：以上时间线按单人/兼职节奏估算，若团队资源更多可并行推进。每一阶段均保持主干可运行，回滚成本 < 30 分钟。
