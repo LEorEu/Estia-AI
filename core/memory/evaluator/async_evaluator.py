@@ -242,35 +242,36 @@ class AsyncMemoryEvaluator:
         Step 12: 保存评估结果到数据库
         
         参数:
-            dialogue_data: 原始对话数据
+            dialogue_data: 对话数据
             evaluation: 评估结果
         """
         try:
-            if not self.db_manager:
-                self.logger.warning("数据库管理器未初始化，跳过保存")
-                return
+            self.logger.debug("保存评估结果到数据库")
             
-            # 步骤1: 创建或更新memory_group记录
-            await self._create_or_update_memory_group(evaluation)
-            
-            # 步骤2: 保存用户消息
+            # 保存用户输入记忆
             user_memory_id = await self._save_single_memory(
                 content=dialogue_data['user_input'],
                 role="user",
                 evaluation=evaluation
             )
             
-            # 步骤3: 保存AI回复
+            # 保存AI回复记忆
             ai_memory_id = await self._save_single_memory(
                 content=dialogue_data['ai_response'],
                 role="assistant", 
                 evaluation=evaluation
             )
             
-            # 步骤4: 更新分组统计信息
+            # 🆕 更新现有记忆的group_id（如果session中有相关记忆）
+            await self._update_existing_memories_group_id(dialogue_data, evaluation)
+            
+            # 创建或更新memory_group表
+            await self._create_or_update_memory_group(evaluation)
+            
+            # 更新分组统计
             await self._update_group_statistics(evaluation['group_id'])
             
-            self.logger.info(f"评估结果已保存: 用户记忆 {user_memory_id}, AI记忆 {ai_memory_id}, 分组: {evaluation['group_id']}")
+            self.logger.info(f"✅ 评估结果保存完成 - 分组: {evaluation['group_id']}")
             
         except Exception as e:
             self.logger.error(f"保存评估结果失败: {e}")
@@ -325,6 +326,69 @@ class AsyncMemoryEvaluator:
             self.db_manager.conn.commit()
         
         return memory_id
+    
+    async def _update_existing_memories_group_id(self, dialogue_data: Dict[str, Any], 
+                                               evaluation: Dict[str, Any]):
+        """
+        更新现有记忆的group_id字段
+        
+        参数:
+            dialogue_data: 对话数据
+            evaluation: 评估结果
+        """
+        try:
+            if not self.db_manager:
+                return
+            
+            session_id = dialogue_data.get('session_id')
+            group_id = evaluation['group_id']
+            super_group = evaluation['super_group']
+            
+            # 查找同一session中的相关记忆（最近24小时内，相同主题）
+            recent_memories = self.db_manager.query(
+                """
+                SELECT id FROM memories 
+                WHERE session_id = ? 
+                  AND timestamp > ? 
+                  AND (group_id IS NULL OR group_id = '')
+                  AND (
+                    content LIKE ? OR 
+                    metadata LIKE ? OR
+                    type = 'user_input' OR type = 'assistant_reply'
+                  )
+                ORDER BY timestamp DESC
+                LIMIT 10
+                """,
+                (
+                    session_id,
+                    evaluation['timestamp'] - 24*3600,  # 24小时内
+                    f'%{super_group}%',
+                    f'%{super_group}%'
+                )
+            )
+            
+            if recent_memories:
+                # 批量更新这些记忆的group_id
+                memory_ids = [memory[0] for memory in recent_memories]
+                placeholders = ','.join(['?' for _ in memory_ids])
+                
+                self.db_manager.execute_query(
+                    f"""
+                    UPDATE memories 
+                    SET group_id = ? 
+                    WHERE id IN ({placeholders})
+                    """,
+                    [group_id] + memory_ids
+                )
+                
+                # 提交事务
+                if self.db_manager.conn:
+                    self.db_manager.conn.commit()
+                
+                self.logger.info(f"✅ 更新了 {len(memory_ids)} 条现有记忆的group_id为 {group_id}")
+            
+        except Exception as e:
+            self.logger.error(f"更新现有记忆group_id失败: {e}")
     
     async def _create_or_update_memory_group(self, evaluation: Dict[str, Any]):
         """

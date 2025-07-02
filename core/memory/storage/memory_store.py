@@ -11,6 +11,7 @@ import logging
 import numpy as np
 from typing import List, Dict, Any, Optional, Union, Tuple
 from datetime import datetime
+from pathlib import Path
 
 # 导入记忆系统组件
 try:
@@ -45,7 +46,8 @@ class MemoryStore:
     整合数据库、向量索引和向量化功能
     """
     
-    def __init__(self, db_path: Optional[str] = None, 
+    def __init__(self, db_manager: Optional["DatabaseManager"] = None,
+                 db_path: Optional[str] = None, 
                  index_path: Optional[str] = None,
                  cache_dir: Optional[str] = None,
                  vector_dim: int = 1024,
@@ -55,6 +57,7 @@ class MemoryStore:
         初始化记忆存储管理器
         
         参数:
+            db_manager: 可选的已存在的数据库管理器，如果提供则复用
             db_path: 数据库路径，如果为None则使用默认路径
             index_path: 向量索引路径，如果为None则使用默认路径
             cache_dir: 缓存目录，如果为None则使用默认路径
@@ -62,14 +65,20 @@ class MemoryStore:
             model_type: 向量化模型类型
             model_name: 向量化模型名称
         """
-        # 设置默认路径
+        # 设置默认路径 - 使用统一的配置
         if db_path is None:
-            db_path = os.path.join("assets", "memory.db")
+            try:
+                from .. import get_default_db_path
+                db_path = get_default_db_path()
+            except ImportError:
+                # 备用方案
+                db_path = os.path.join("assets", "memory.db")
             
         if index_path is None:
             index_path = os.path.join("data", "vectors", "memory_index.bin")
             
         if cache_dir is None:
+            # 使用data/memory/cache作为运行时缓存目录（保持现有数据）
             cache_dir = os.path.join("data", "memory", "cache")
         
         # 确保目录存在
@@ -83,12 +92,17 @@ class MemoryStore:
         self.vector_dim = vector_dim
         
         # 初始化组件
-        self.db_manager: Optional["DatabaseManager"] = None
         self.vector_index: Optional["VectorIndexManager"] = None
         self.vectorizer: Optional["TextVectorizer"] = None
         
-        # 初始化数据库管理器
-        self._init_db_manager()
+        # 🔥 优化：复用已存在的数据库管理器，避免重复初始化
+        if db_manager is not None:
+            self.db_manager = db_manager
+            logger.info(f"✅ 复用现有数据库管理器: {db_manager.db_path}")
+        else:
+            self.db_manager = None
+            # 初始化新的数据库管理器
+            self._init_db_manager()
         
         # 初始化向量索引管理器
         self._init_vector_index()

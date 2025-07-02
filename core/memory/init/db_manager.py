@@ -29,8 +29,13 @@ class DatabaseManager:
             db_path: 数据库文件路径，如果为None则使用默认路径
         """
         if db_path is None:
-            # 默认路径为assets/memory.db
-            db_path = os.path.join("assets", "memory.db")
+            # 使用统一的默认路径配置
+            try:
+                from .. import get_default_db_path
+                db_path = get_default_db_path()
+            except ImportError:
+                # 备用方案
+                db_path = os.path.join("assets", "memory.db")
             
         # 确保目录存在
         os.makedirs(os.path.dirname(db_path), exist_ok=True)

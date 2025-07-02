@@ -12,6 +12,7 @@ import re
 import logging
 from typing import Dict, Any, List, Optional, Tuple, Union
 from collections import OrderedDict
+from pathlib import Path
 
 # 尝试导入日志工具
 try:
@@ -57,6 +58,7 @@ class EnhancedMemoryCache:
         
         # 设置缓存目录
         if cache_dir is None:
+            # 使用data/memory/cache作为运行时缓存目录（保持现有数据）
             self.cache_dir = os.path.join("data", "memory", "cache")
         else:
             self.cache_dir = cache_dir

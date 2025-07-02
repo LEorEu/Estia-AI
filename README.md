@@ -10,6 +10,7 @@
 - **⚡ 异步处理**：后台异步记忆评估，不影响对话流畅性
 - **🎯 个性化**：可配置的AI人格和交互模式
 - **🔧 模块化设计**：清晰的架构分层，易于扩展和维护
+- **🚀 性能优化**：单例模式模型加载，完全离线运行，启动时间优化至22秒
 
 ## 🚀 快速开始
 
@@ -17,7 +18,7 @@
 
 ```bash
 # 克隆项目
-git clone https://github.com/your-username/estia-ai.git
+git clone https://github.com/LEorEu/Estia-AI.git
 cd estia-ai
 
 # 运行安装脚本
@@ -34,7 +35,7 @@ cd ..
 
 ```python
 # 选择模型提供商
-MODEL_PROVIDER = "deepseek"  # 可选: "local", "openai", "deepseek", "gemini"
+MODEL_PROVIDER = "gemini"  # 可选: "local", "openai", "deepseek", "gemini"
 
 # 配置对应的API密钥
 DEEPSEEK_API_KEY = "your-api-key-here"
@@ -47,9 +48,11 @@ DEEPSEEK_API_KEY = "your-api-key-here"
 start.bat
 
 # 或者手动启动
-python main.py --mode voice    # 语音模式
+python main.py --mode voice    # 语音模式（推荐）
 python main.py --mode text     # 文本模式
 ```
+
+**注意**：首次启动会下载模型文件到本地缓存，后续启动将完全离线运行。
 
 ## 🏗️ 系统架构
 
@@ -60,13 +63,14 @@ estia/
 ├── core/                    # 核心功能模块
 │   ├── app.py              # 应用主控制器
 │   ├── memory/             # 记忆系统
-│   │   ├── pipeline.py     # 记忆处理主管道
+│   │   ├── estia_memory.py # 记忆系统主控制器
 │   │   ├── init/           # 数据库和向量索引初始化
 │   │   ├── retrieval/      # 智能检索系统
 │   │   ├── evaluator/      # 异步记忆评估
 │   │   ├── context/        # 上下文构建
 │   │   ├── storage/        # 记忆存储管理
 │   │   ├── embedding/      # 向量嵌入和缓存
+│   │   ├── memory_cache/   # 智能缓存管理
 │   │   └── association/    # 记忆关联网络
 │   ├── dialogue/           # 对话系统
 │   │   ├── engine.py       # 对话引擎
@@ -133,6 +137,7 @@ Estia的记忆系统采用13步处理流程：
 - 基于OpenAI Whisper模型
 - 支持实时语音转文本
 - 可配置识别语言和模型精度
+- **离线支持**：本地模型缓存，无需网络连接
 
 ### 语音合成
 - 支持多种TTS引擎
@@ -157,12 +162,19 @@ Estia的记忆系统采用13步处理流程：
 - 支持自定义提示词模板
 - 个性化回复风格
 
-## 📊 性能特性
+## ⚡ 性能特性
+
+### 模型加载优化
+- **单例模式**：全局唯一模型实例，避免重复加载
+- **离线支持**：完全离线运行，无需网络连接
+- **快速启动**：启动时间优化至22秒
+- **本地缓存**：模型文件本地存储，避免重复下载
 
 ### 缓存优化
-- 多级记忆缓存机制
-- 向量嵌入缓存
-- 智能缓存失效策略
+- **多级记忆缓存机制**
+- **向量嵌入缓存**
+- **智能缓存失效策略**
+- **本地模型缓存**：支持离线模型加载
 
 ### 异步处理
 - 后台异步记忆评估
@@ -235,6 +247,7 @@ python scripts/build_index.py
 - ✅ 多模型对话引擎支持
 - ✅ 语音输入输出功能
 - ✅ 模块化架构设计
+- ✅ 性能优化和离线支持
 
 ### 开发中功能
 - 🔄 记忆系统优化，记忆归档、记忆遗忘、记忆冲突

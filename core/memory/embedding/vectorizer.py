@@ -7,6 +7,7 @@ import numpy as np
 import logging
 from typing import List, Dict, Any, Optional, Union, Tuple
 import time
+from pathlib import Path
 
 # 尝试导入日志工具
 try:
@@ -35,12 +36,22 @@ class TextVectorizer:
     - 自定义模型
     """
     
+    # 🔥 单例模式：全局唯一实例
+    _instance = None
+    _initialized = False
+    
     # 支持的模型类型
     MODEL_TYPES = ["sentence-transformers", "openai", "custom"]
     
     # 默认模型配置
     DEFAULT_MODEL = "sentence-transformers"
     DEFAULT_MODEL_NAME = "Qwen/Qwen3-Embedding-0.6B"  # 使用阿里巴巴的Qwen模型
+    
+    def __new__(cls, *args, **kwargs):
+        """单例模式：确保全局只有一个实例"""
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
     
     def __init__(self, model_type: Optional[str] = None, model_name: Optional[str] = None, 
                  api_key: Optional[str] = None, cache_dir: Optional[str] = None, 
@@ -52,15 +63,30 @@ class TextVectorizer:
             model_type: 模型类型，可选值为 "sentence-transformers", "openai", "custom"
             model_name: 模型名称，对于sentence-transformers是模型ID，对于openai是模型名称
             api_key: API密钥，用于OpenAI API
-            cache_dir: 缓存目录
+            cache_dir: 缓存目录，默认使用项目内部cache目录
             use_cache: 是否使用缓存
             device: 设备，可选值为 "cpu", "cuda", "mps"（对于Apple Silicon）
         """
+        # 🔥 单例模式：只初始化一次
+        if self._initialized:
+            logger.debug("TextVectorizer已初始化，跳过重复初始化")
+            return
+            
         self.model_type = model_type or self.DEFAULT_MODEL
         self.model_name = model_name or self.DEFAULT_MODEL_NAME
         self.api_key = api_key
         self.device = device
         self.use_cache = use_cache and EmbeddingCache is not None
+        
+        # 🔥 优化：区分模型缓存和运行时缓存
+        if cache_dir is None:
+            # 运行时缓存使用data/memory/cache（保持现有数据）
+            self.cache_dir = os.path.join("data", "memory", "cache")
+        else:
+            self.cache_dir = cache_dir
+        
+        # 模型缓存使用项目根目录的cache（避免网络下载）
+        self.model_cache_dir = str(Path(__file__).parent.parent.parent.parent / "cache")
         
         # 初始化模型
         self.model = None
@@ -69,13 +95,17 @@ class TextVectorizer:
         # 初始化增强缓存
         self.cache = None
         if self.use_cache and EmbeddingCache is not None:
-            self.cache = EmbeddingCache(cache_dir=cache_dir)
+            self.cache = EmbeddingCache(cache_dir=self.cache_dir)
             logger.info("已启用增强版记忆缓存")
         
         # 加载模型
         self._load_model()
         
+        # 🔥 标记为已初始化
+        self._initialized = True
+        
         logger.info(f"文本向量化器初始化完成，使用模型: {self.model_type}/{self.model_name}")
+        logger.info(f"缓存目录: {self.cache_dir}")
     
     def _load_model(self) -> None:
         """加载Embedding模型"""
@@ -91,50 +121,55 @@ class TextVectorizer:
             self._load_sentence_transformers()
     
     def _load_sentence_transformers(self) -> None:
-        """加载sentence-transformers模型"""
+        """加载sentence-transformers模型，使用项目内部缓存"""
         try:
-            # 🔥 强制离线模式 - 优先使用本地缓存
-            # 设置环境变量禁用网络检查
-            os.environ["HF_HUB_OFFLINE"] = "1"  # 强制离线模式
-            os.environ["TRANSFORMERS_OFFLINE"] = "1"  # transformers离线模式
-            os.environ["HF_DATASETS_OFFLINE"] = "1"  # datasets离线模式
-            
-            # 设置镜像源（用于必要时的下载）
-            os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
-            
             from sentence_transformers import SentenceTransformer
             
-            # 先尝试完全离线加载
+            # 🔥 设置项目内部缓存环境（用于模型缓存）
+            os.environ['HUGGINGFACE_HUB_CACHE'] = self.model_cache_dir
+            os.environ['SENTENCE_TRANSFORMERS_HOME'] = self.model_cache_dir
+            os.environ['HF_HOME'] = self.model_cache_dir
+            
+            # 优先使用离线模式，避免网络问题
+            os.environ['HF_HUB_OFFLINE'] = '1'
+            os.environ['TRANSFORMERS_OFFLINE'] = '1'
+            
+            logger.info(f"🔧 使用项目模型缓存目录: {self.model_cache_dir}")
+            logger.info(f"🔄 加载模型: {self.model_name}")
+            
             try:
-                logger.info(f"🔄 尝试离线加载模型: {self.model_name}")
+                # 尝试从项目缓存加载
                 self.model = SentenceTransformer(
-                    self.model_name, 
+                    self.model_name,
                     device=self.device,
-                    cache_folder="cache"  # 明确指定缓存目录
+                    cache_folder=self.model_cache_dir
                 )
-                logger.info("✅ 离线模式加载成功")
+                logger.info(f"✅ 从项目缓存加载成功: {self.model_name}")
                 
             except Exception as offline_error:
-                logger.warning(f"离线加载失败: {offline_error}")
-                logger.info("🌐 切换到在线模式...")
+                logger.warning(f"项目缓存加载失败: {offline_error}")
+                logger.info("🌐 尝试在线模式...")
                 
-                # 如果离线失败，清除离线设置，允许联网
-                if "HF_HUB_OFFLINE" in os.environ:
-                    del os.environ["HF_HUB_OFFLINE"]
-                if "TRANSFORMERS_OFFLINE" in os.environ:
-                    del os.environ["TRANSFORMERS_OFFLINE"]
+                # 清除离线设置，允许联网下载
+                if 'HF_HUB_OFFLINE' in os.environ:
+                    del os.environ['HF_HUB_OFFLINE']
+                if 'TRANSFORMERS_OFFLINE' in os.environ:
+                    del os.environ['TRANSFORMERS_OFFLINE']
+                
+                # 设置镜像站
+                os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
                 
                 # 重新尝试加载
                 self.model = SentenceTransformer(
-                    self.model_name, 
+                    self.model_name,
                     device=self.device,
-                    cache_folder="cache"
+                    cache_folder=self.model_cache_dir
                 )
-                logger.info("✅ 在线模式加载成功")
+                logger.info(f"✅ 在线模式加载成功: {self.model_name}")
             
             # 获取向量维度
             self.vector_dim = self.model.get_sentence_embedding_dimension()
-            logger.info(f"模型初始化完成，向量维度: {self.vector_dim}")
+            logger.info(f"✅ 模型初始化完成，向量维度: {self.vector_dim}")
             
         except ImportError:
             logger.error("未找到sentence-transformers库，请安装: pip install sentence-transformers")

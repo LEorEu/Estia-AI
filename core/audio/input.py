@@ -19,9 +19,35 @@ import numpy as np                  # 导入 numpy 库，sounddevice 录制的�
 import torch                        # 导入 torch (PyTorch)，主要用于指定模型计算时的数据类型和使用的设备(CPU/GPU)。
 import msvcrt                       # 导入 msvcrt 库，用于在 Windows 上检测键盘输入
 import time                         # 导入 time 模块，用于实现短暂的睡眠
+from pathlib import Path
 
-# 预先设置环境变量来使用镜像站点
-os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+# 预先设置环境变量来使用项目内部缓存
+project_root = Path(__file__).parent.parent.parent  # 回到项目根目录
+cache_dir = str(project_root / "cache")
+
+# 设置环境变量使用项目内部缓存
+os.environ["HUGGINGFACE_HUB_CACHE"] = cache_dir
+os.environ["HF_HOME"] = cache_dir
+os.environ["TRANSFORMERS_CACHE"] = cache_dir
+
+# 优先使用离线模式，如果缓存存在的话
+whisper_model_cache = project_root / "cache" / "models--openai--whisper-large-v3-turbo"
+if whisper_model_cache.exists():
+    # 🔥 强制离线模式，避免任何网络连接
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    os.environ["TRANSFORMERS_OFFLINE"] = "1"
+    os.environ["HF_DATASETS_OFFLINE"] = "1"
+    os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
+    os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+    os.environ["HF_HUB_DISABLE_IMPLICIT_TOKEN"] = "1"
+    os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
+    print(f"✅ 检测到项目缓存中的Whisper模型，使用强制离线模式")
+else:
+    # 如果本地缓存不存在，使用镜像站下载
+    os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+    print(f"⚠️ 未检测到项目缓存，将使用镜像站下载模型")
+
+print(f"📁 Whisper模型缓存目录: {cache_dir}")
 
 from transformers import pipeline   # 从强大的 transformers 库中导入 pipeline，这是使用 Hugging Face 模型最简单、最高效的方式。
 from config import settings         # 从我们的配置文件中导入 settings，这样就可以方便地管理和更改模型ID。
@@ -42,18 +68,66 @@ print(f"🚀 正在从配置加载 Whisper 模型: {settings.WHISPER_MODEL_ID}")
 
 # 使用 transformers.pipeline 创建一个自动语音识别(ASR)任务管道
 try:
-    pipe = pipeline(
-        "automatic-speech-recognition",         # 参数1: 指定任务类型为"自动语音识别"。
-        model=settings.WHISPER_MODEL_ID,        # 参数2: 指定要使用的模型，这里的ID是从我们的配置文件中读取的。
-        torch_dtype=torch.float16,              # 参数3: 指定模型计算时使用的数据类型为半精度浮点数(float16)，在NVIDIA显卡上可以大幅提升速度并减少显存占用。
-        device="cuda:0" if torch.cuda.is_available() else "cpu", # 参数4: 如果有NVIDIA显卡则使用，否则用CPU
-    )
-    print("Device set to use", pipe.device)
-    print("✅ Whisper pipeline 设置完成，随时可以开始识别！")
+    print(f"🔄 正在加载Whisper模型: {settings.WHISPER_MODEL_ID}")
+    
+    # 🔥 强制使用本地路径加载，避免任何网络连接
+    if whisper_model_cache.exists():
+        # 找到本地模型路径
+        snapshots_dir = whisper_model_cache / "snapshots"
+        if snapshots_dir.exists():
+            snapshot_dirs = list(snapshots_dir.iterdir())
+            if snapshot_dirs:
+                local_model_path = str(snapshot_dirs[0])
+                print(f"📦 使用本地模型路径: {local_model_path}")
+                
+                pipe = pipeline(
+                    "automatic-speech-recognition",
+                    model=local_model_path,  # 直接使用本地路径
+                    torch_dtype=torch.float16,
+                    device="cuda:0" if torch.cuda.is_available() else "cpu"
+                )
+                print("📱 使用设备:", pipe.device)
+                print("✅ Whisper pipeline 设置完成，随时可以开始识别！")
+            else:
+                raise Exception("本地模型快照目录为空")
+        else:
+            raise Exception("本地模型快照目录不存在")
+    else:
+        # 如果本地缓存不存在，使用在线模式
+        print("⚠️ 本地缓存不存在，使用在线模式...")
+        pipe = pipeline(
+            "automatic-speech-recognition",
+            model=settings.WHISPER_MODEL_ID,
+            torch_dtype=torch.float16,
+            device="cuda:0" if torch.cuda.is_available() else "cpu"
+        )
+        print("📱 使用设备:", pipe.device)
+        print("✅ Whisper pipeline 设置完成，随时可以开始识别！")
+        
 except Exception as e:
     print(f"❌ Whisper 模型加载失败: {str(e)}")
     print("⚠️ 语音转文本功能将不可用。")
-    pipe = None
+    
+    # 如果离线模式失败，尝试在线模式
+    if "HF_HUB_OFFLINE" in os.environ:
+        print("🌐 尝试在线模式重新加载...")
+        del os.environ["HF_HUB_OFFLINE"]
+        del os.environ["TRANSFORMERS_OFFLINE"]
+        os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+        
+        try:
+            pipe = pipeline(
+                "automatic-speech-recognition",
+                model=settings.WHISPER_MODEL_ID,
+                torch_dtype=torch.float16,
+                device="cuda:0" if torch.cuda.is_available() else "cpu"
+            )
+            print("✅ 在线模式加载成功！")
+        except Exception as e2:
+            print(f"❌ 在线模式也失败: {str(e2)}")
+            pipe = None
+    else:
+        pipe = None
 
 
 # -----------------------------------------------------------------------------

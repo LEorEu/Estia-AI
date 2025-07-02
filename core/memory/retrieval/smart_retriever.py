@@ -11,7 +11,7 @@
 import logging
 from typing import List, Dict, Any, Optional
 from ..init.db_manager import DatabaseManager
-from ..cache.cache_manager import CacheManager
+from ..memory_cache.cache_manager import CacheManager
 
 logger = logging.getLogger(__name__)
 

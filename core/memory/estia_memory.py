@@ -27,7 +27,8 @@ class EstiaMemorySystem:
         Args:
             enable_advanced: 是否启用高级功能（关联网络、异步评估等）
         """
-        self.logger = logging.getLogger('core.memory.estia_memory')
+        # 使用模块级logger，避免重复设置
+        self.logger = logger
         
         # 核心组件
         self.db_manager = None
@@ -69,10 +70,10 @@ class EstiaMemorySystem:
                 self.db_manager.initialize_database()
                 logger.info("✅ 数据库管理器初始化成功")
             
-            # Step 2: 初始化记忆存储 - 核心组件
+            # Step 2: 初始化记忆存储 - 🔥 复用db_manager避免重复初始化
             from .storage.memory_store import MemoryStore
-            self.memory_store = MemoryStore()
-            logger.info("✅ 记忆存储初始化成功")
+            self.memory_store = MemoryStore(db_manager=self.db_manager)
+            logger.info("✅ 记忆存储初始化成功 (复用数据库连接)")
             
             # Step 3: 初始化其他高级组件
             if self.enable_advanced:
