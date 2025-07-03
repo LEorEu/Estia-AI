@@ -477,6 +477,64 @@ class VectorIndexManager:
         except Exception as e:
             logger.error(f"训练索引失败: {e}")
             return False
+    
+    def get_total_count(self) -> int:
+        """
+        获取索引中的向量总数
+        
+        返回:
+            int: 向量总数，如果索引未初始化则返回0
+        """
+        if not self.available or self.index is None:
+            return 0
+        
+        try:
+            return self.index.ntotal
+        except Exception as e:
+            logger.error(f"获取向量总数失败: {e}")
+            return 0
+    
+    def clear(self) -> bool:
+        """
+        清空索引中的所有向量
+        
+        返回:
+            bool: 是否成功清空
+        """
+        if not self.available:
+            logger.error("FAISS库未安装，无法清空索引")
+            return False
+            
+        try:
+            # 重新创建索引
+            success = self.create_index()
+            if success:
+                logger.info("成功清空向量索引")
+                return True
+            else:
+                logger.error("清空向量索引失败")
+                return False
+        except Exception as e:
+            logger.error(f"清空向量索引失败: {e}")
+            return False
+    
+    def close(self):
+        """
+        关闭索引管理器
+        """
+        try:
+            if self.available and self.index is not None:
+                # 保存索引
+                self.save_index()
+                
+            # 清理资源
+            self.index = None
+            self.id_map = {}
+            self.available = False
+            
+            logger.info("向量索引管理器已关闭")
+        except Exception as e:
+            logger.error(f"关闭向量索引管理器失败: {e}")
 
 # 模块测试代码
 if __name__ == "__main__":

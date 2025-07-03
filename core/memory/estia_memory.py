@@ -124,44 +124,35 @@ class EstiaMemorySystem:
             self.enable_advanced = False
     
     def _initialize_async_evaluator(self):
-        """🔥 初始化异步评估器 - Step 11-13的核心"""
+        """🔥 初始化异步评估器 - Step 11-13的核心 - 使用稳定的启动管理器"""
         try:
             from .evaluator.async_evaluator import AsyncMemoryEvaluator
-            self.async_evaluator = AsyncMemoryEvaluator(self.db_manager)
-            logger.info("✅ 异步评估器初始化成功")
+            from .evaluator.async_startup_manager import initialize_async_evaluator_safely
             
-            # 启动异步评估器（如果在异步环境中）
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    # 在运行中的事件循环中创建任务
-                    asyncio.create_task(self._start_async_evaluator())
+            # 创建异步评估器实例
+            self.async_evaluator = AsyncMemoryEvaluator(self.db_manager)
+            logger.info("✅ 异步评估器实例创建成功")
+            
+            # 使用稳定的启动管理器初始化
+            self.async_initialized = initialize_async_evaluator_safely(self.async_evaluator)
+            
+            if self.async_initialized:
+                logger.info("🚀 异步评估器启动成功 - 使用稳定启动管理器")
                 else:
-                    # 同步启动
-                    asyncio.run(self._start_async_evaluator())
-            except RuntimeError:
-                # 没有事件循环，延迟启动
-                logger.info("⏳ 异步评估器将在第一次使用时启动")
+                logger.warning("⚠️ 异步评估器启动失败，将在后续尝试重新启动")
                 
         except Exception as e:
             logger.warning(f"异步评估器初始化失败: {e}")
             self.async_evaluator = None
-    
-    async def _start_async_evaluator(self):
-        """启动异步评估器"""
-        try:
-            if self.async_evaluator and not self.async_initialized:
-                await self.async_evaluator.start()
-                self.async_initialized = True
-                logger.info("🚀 异步评估器启动成功")
-        except Exception as e:
-            logger.error(f"异步评估器启动失败: {e}")
             self.async_initialized = False
     
-    async def ensure_async_initialized(self):
-        """确保异步组件已初始化"""
+    def ensure_async_initialized(self):
+        """确保异步组件已初始化 - 简化版本"""
         if not self.async_initialized and self.async_evaluator:
-            await self._start_async_evaluator()
+            from .evaluator.async_startup_manager import initialize_async_evaluator_safely
+            self.async_initialized = initialize_async_evaluator_safely(self.async_evaluator)
+            
+        return self.async_initialized
     
     def start_new_session(self, session_id: str = None) -> str:
         """开始新的对话会话"""
@@ -373,43 +364,36 @@ class EstiaMemorySystem:
     
     def _safe_trigger_async_evaluation(self, user_input: str, ai_response: str, 
                                      session_id: str, context_memories: List):
-        """安全地触发异步评估"""
+        """安全地触发异步评估 - 使用稳定的启动管理器"""
         try:
-            # 检查是否有运行中的事件循环
-            try:
-                loop = asyncio.get_running_loop()
-                # 如果有运行中的事件循环，创建任务
-                asyncio.create_task(self._queue_for_async_evaluation(
+            # 确保异步评估器已初始化
+            if not self.ensure_async_initialized():
+                logger.warning("异步评估器未就绪，跳过异步评估")
+                return
+            
+            # 使用启动管理器安全地加入评估任务
+            from .evaluator.async_startup_manager import queue_evaluation_task_safely
+            
+            # 创建评估协程
+            evaluation_coro = self._queue_for_async_evaluation(
                     user_input, ai_response, session_id, context_memories
-                ))
-                logger.debug("✅ 异步评估任务已创建")
-            except RuntimeError:
-                # 没有运行中的事件循环，使用线程安全的方式
-                import threading
-                
-                def run_async_evaluation():
-                    try:
-                        asyncio.run(self._queue_for_async_evaluation(
-                            user_input, ai_response, session_id, context_memories
-                        ))
-                    except Exception as e:
-                        logger.error(f"异步评估执行失败: {e}")
-                
-                # 在新线程中运行
-                thread = threading.Thread(target=run_async_evaluation, daemon=True)
-                thread.start()
-                logger.debug("✅ 异步评估线程已启动")
+            )
+            
+            # 安全地加入队列
+            success = queue_evaluation_task_safely(evaluation_coro)
+            
+            if success:
+                logger.debug("✅ 异步评估任务已安全加入队列")
+            else:
+                logger.warning("❌ 异步评估任务加入失败")
                 
         except Exception as e:
             logger.error(f"异步评估触发失败: {e}")
     
     async def _queue_for_async_evaluation(self, user_input: str, ai_response: str, 
                                         session_id: str, context_memories: List):
-        """将对话加入异步评估队列"""
+        """将对话加入异步评估队列 - 简化版本"""
         try:
-            # 确保异步评估器已启动
-            await self.ensure_async_initialized()
-            
             if self.async_evaluator and self.async_initialized:
                 await self.async_evaluator.queue_dialogue_for_evaluation(
                     user_input=user_input,
@@ -541,11 +525,19 @@ class EstiaMemorySystem:
         return stats
     
     async def shutdown(self):
-        """🔥 优雅关闭系统"""
+        """🔥 优雅关闭系统 - 使用启动管理器"""
         try:
+            # 使用启动管理器关闭异步评估器
             if self.async_evaluator and self.async_initialized:
+                try:
+                    from .evaluator.async_startup_manager import get_startup_manager
+                    startup_manager = get_startup_manager()
+                    startup_manager.shutdown()
+                    logger.info("✅ 异步评估器已通过启动管理器关闭")
+                except Exception as e:
+                    logger.warning(f"启动管理器关闭失败，尝试直接关闭: {e}")
                 await self.async_evaluator.stop()
-                logger.info("✅ 异步评估器已停止")
+                    logger.info("✅ 异步评估器已直接关闭")
             
             if self.memory_store:
                 self.memory_store.close()
