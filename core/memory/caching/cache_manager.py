@@ -10,7 +10,7 @@
 import time
 import logging
 import threading
-from typing import Dict, List, Any, Optional, Set, TypeVar, Generic, Type, Union, Tuple
+from typing import Dict, List, Any, Optional, Set, TypeVar, Generic, Type, Union, Tuple, cast
 from pathlib import Path
 
 from .cache_interface import (
@@ -161,13 +161,23 @@ class UnifiedCacheManager(CacheListener, Generic[K, V, M]):
         """
         cache_id = cache.cache_id
         
+        # 🔥 关键修复：如果已注册，先清理旧的缓存
         if cache_id in self.caches:
             logger.warning(f"缓存系统 {cache_id} 已注册，将被替换")
+            old_cache = self.caches[cache_id]
+            old_level = old_cache.get_cache_level()
+            
+            # 从级别列表中移除旧缓存
+            if old_cache in self.level_caches[old_level]:
+                self.level_caches[old_level].remove(old_cache)
+            
+            # 移除旧的事件监听
+            old_cache.remove_listener(self)
             
         # 注册缓存
         self.caches[cache_id] = cache
         
-        # 按缓存级别归类
+        # 按缓存级别归类 (现在不会重复了)
         cache_level = cache.get_cache_level()
         self.level_caches[cache_level].append(cache)
         
@@ -302,26 +312,23 @@ class UnifiedCacheManager(CacheListener, Generic[K, V, M]):
         从所有缓存中删除项
         
         参数:
-            key: 缓存键
+            key: 要删除的键
             
         返回:
-            是否成功删除(任一缓存删除成功即返回True)
+            是否成功删除
         """
+        success = False
         self.stats.record_operation("delete")
         
-        success = False
-        
-        # 如果键映射中有记录
+        # 从已知缓存中删除
         if key in self.key_cache_map:
             cache_ids = list(self.key_cache_map[key])
             for cache_id in cache_ids:
                 if cache_id in self.caches:
                     if self.caches[cache_id].delete(key):
                         success = True
-                        
-            # 清除键映射
-            del self.key_cache_map[key]
-            
+            # 注意：不要手动删除键映射，让事件处理器自动处理
+        
         # 从所有缓存中删除(以防万一)
         if self.config["sync_on_delete"]:
             for cache in self.caches.values():
@@ -459,8 +466,10 @@ class UnifiedCacheManager(CacheListener, Generic[K, V, M]):
         # 执行维护
         self._perform_maintenance()
         
-        # 计划下次维护
-        threading.Timer(interval, self._schedule_maintenance).start()
+        # 计划下次维护 (守护线程避免阻塞进程退出)
+        timer = threading.Timer(interval, self._schedule_maintenance)
+        timer.daemon = True
+        timer.start()
     
     def _perform_maintenance(self) -> None:
         """执行缓存维护"""
@@ -501,4 +510,221 @@ class UnifiedCacheManager(CacheListener, Generic[K, V, M]):
         
         # 删除无效键
         for key in to_remove:
-            del self.key_cache_map[key] 
+            del self.key_cache_map[key]
+    
+    # ============== 业务友好的API方法 ==============
+    
+    def record_memory_access(self, memory_id: str, access_weight: float = 1.0) -> None:
+        """
+        记录记忆访问，更新缓存优先级
+        
+        参数:
+            memory_id: 记忆ID
+            access_weight: 访问权重
+        """
+        try:
+            # 构造访问记录键
+            access_key = f"memory_access_{memory_id}"
+            
+            # 记录访问信息
+            access_info = {
+                "memory_id": memory_id,
+                "access_time": time.time(),
+                "access_weight": access_weight,
+                "access_count": 1
+            }
+            
+            # 检查是否已有访问记录
+            existing_access = self.get(access_key)  # type: ignore
+            if existing_access:
+                if hasattr(existing_access, 'get'):
+                    access_info["access_count"] = existing_access.get("access_count", 0) + 1  # type: ignore
+                    access_info["total_weight"] = existing_access.get("total_weight", 0) + access_weight  # type: ignore
+                else:
+                    access_info["total_weight"] = access_weight
+            else:
+                access_info["total_weight"] = access_weight
+            
+            # 存储到统一缓存
+            self.put(access_key, access_info, {"type": "memory_access"})  # type: ignore
+            
+            # 尝试委托给数据库缓存适配器
+            for cache in self.caches.values():
+                if hasattr(cache, 'record_memory_access'):
+                    try:
+                        cache.record_memory_access(memory_id, access_weight)
+                        logger.debug(f"委托记录记忆访问: {memory_id} -> {cache.cache_id}")
+                        break
+                    except Exception as e:
+                        logger.debug(f"委托记录访问失败 {cache.cache_id}: {e}")
+                        
+            logger.debug(f"记录记忆访问: {memory_id}, 权重: {access_weight}")
+            
+        except Exception as e:
+            logger.error(f"记录记忆访问失败: {e}")
+    
+    def get_cached_memories(self, cache_level: str = None, limit: int = 50) -> List[str]:
+        """
+        获取缓存的记忆ID列表
+        
+        参数:
+            cache_level: 缓存级别过滤('hot', 'warm', None为全部)
+            limit: 返回数量限制
+            
+        返回:
+            记忆ID列表
+        """
+        try:
+            memory_ids = []
+            
+            # 尝试委托给数据库缓存适配器
+            for cache in self.caches.values():
+                if hasattr(cache, 'get_cached_memories'):
+                    try:
+                        cached_ids = cache.get_cached_memories(cache_level, limit)
+                        if cached_ids:
+                            memory_ids.extend(cached_ids)
+                            logger.debug(f"从 {cache.cache_id} 获取缓存记忆: {len(cached_ids)} 条")
+                            break
+                    except Exception as e:
+                        logger.debug(f"从 {cache.cache_id} 获取缓存记忆失败: {e}")
+            
+            # 如果没有委托成功，从访问记录中推导
+            if not memory_ids:
+                access_keys = [key for key in self.key_cache_map.keys() 
+                             if str(key).startswith("memory_access_")]
+                
+                # 按访问权重排序
+                access_records = []
+                for key in access_keys:
+                    access_info = self.get(key)
+                    if access_info:
+                        memory_id = access_info.get("memory_id", str(key).replace("memory_access_", ""))
+                        weight = access_info.get("total_weight", 0)
+                        access_records.append((memory_id, weight))
+                
+                # 排序并取前N个
+                access_records.sort(key=lambda x: x[1], reverse=True)
+                memory_ids = [record[0] for record in access_records[:limit]]
+                
+                logger.debug(f"从访问记录推导缓存记忆: {len(memory_ids)} 条")
+            
+            return memory_ids
+            
+        except Exception as e:
+            logger.error(f"获取缓存记忆失败: {e}")
+            return []
+    
+    def search_by_content(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        基于内容搜索缓存记忆
+        
+        参数:
+            query: 搜索查询
+            limit: 限制数量
+            
+        返回:
+            记忆列表
+        """
+        try:
+            results = []
+            
+            # 尝试委托给具有搜索能力的缓存
+            for cache in self.caches.values():
+                if hasattr(cache, 'search_by_content'):
+                    try:
+                        search_results = cache.search_by_content(query, limit)
+                        if search_results:
+                            results.extend(search_results)
+                            logger.debug(f"从 {cache.cache_id} 搜索到: {len(search_results)} 条")
+                            break
+                    except Exception as e:
+                        logger.debug(f"从 {cache.cache_id} 搜索失败: {e}")
+            
+            return results[:limit]
+            
+        except Exception as e:
+            logger.error(f"内容搜索失败: {e}")
+            return []
+    
+    def get_business_cache_stats(self) -> Dict[str, Any]:
+        """
+        获取业务友好的缓存统计信息
+        
+        返回:
+            统计信息字典
+        """
+        try:
+            # 基础统计
+            basic_stats = self.get_stats()
+            
+            # 业务统计
+            business_stats = {
+                "unified_cache_manager": {
+                    "total_caches": len(self.caches),
+                    "registered_caches": list(self.caches.keys()),
+                    "total_keys": len(self.key_cache_map),
+                    "hit_ratio": basic_stats["manager"]["hit_ratio"],
+                    "average_access_time_ms": basic_stats["manager"]["average_access_time_ms"]
+                },
+                "cache_details": basic_stats["caches"],
+                "memory_access_records": 0,
+                "cache_levels": {level.value: len(caches) for level, caches in self.level_caches.items()}
+            }
+            
+            # 统计访问记录数量
+            access_count = len([key for key in self.key_cache_map.keys() 
+                              if str(key).startswith("memory_access_")])
+            business_stats["memory_access_records"] = access_count
+            
+            # 尝试获取具体缓存的业务统计
+            for cache_id, cache in self.caches.items():
+                if hasattr(cache, 'get_cache_stats'):
+                    try:
+                        cache_business_stats = cache.get_cache_stats()
+                        business_stats["cache_details"][cache_id].update({
+                            "business_stats": cache_business_stats
+                        })
+                    except Exception as e:
+                        logger.debug(f"获取 {cache_id} 业务统计失败: {e}")
+            
+            return business_stats
+            
+        except Exception as e:
+            logger.error(f"获取业务缓存统计失败: {e}")
+            return {"error": str(e)}
+    
+    def clear_memory_cache(self, memory_type: str = None) -> None:
+        """
+        清除特定类型的记忆缓存
+        
+        参数:
+            memory_type: 记忆类型，None表示清除所有
+        """
+        try:
+            if memory_type is None:
+                # 清除所有缓存
+                self.clear_all()
+                logger.info("已清除所有统一缓存")
+            else:
+                # 清除特定类型的缓存
+                to_remove = []
+                for key in self.key_cache_map.keys():
+                    if memory_type in str(key):
+                        to_remove.append(key)
+                
+                for key in to_remove:
+                    self.delete(key)
+                
+                logger.info(f"已清除 {memory_type} 类型缓存，共 {len(to_remove)} 项")
+            
+            # 尝试委托给具体缓存
+            for cache in self.caches.values():
+                if hasattr(cache, 'clear_memory_cache'):
+                    try:
+                        cache.clear_memory_cache(memory_type)
+                    except Exception as e:
+                        logger.debug(f"委托清除 {cache.cache_id} 缓存失败: {e}")
+                        
+        except Exception as e:
+            logger.error(f"清除记忆缓存失败: {e}") 

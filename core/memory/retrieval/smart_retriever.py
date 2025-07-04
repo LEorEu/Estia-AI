@@ -34,6 +34,23 @@ class SmartRetriever:
         try:
             self.cache_manager.initialize_cache()
             self.logger.info("智能缓存系统已初始化")
+            # 🆕 注册数据库缓存到统一缓存管理器
+            try:
+                from ..caching.cache_adapters import DbCacheAdapter, SmartRetrieverCacheAdapter
+                from ..caching.cache_manager import UnifiedCacheManager
+                
+                # 注册数据库缓存适配器
+                db_adapter = DbCacheAdapter(self.cache_manager)
+                UnifiedCacheManager.get_instance().register_cache(db_adapter)
+                self.logger.info("✅ 数据库缓存已接入统一缓存管理器")
+                
+                # 注册SmartRetriever缓存适配器
+                retriever_adapter = SmartRetrieverCacheAdapter(self)
+                UnifiedCacheManager.get_instance().register_cache(retriever_adapter)
+                self.logger.info("✅ SmartRetriever缓存已接入统一缓存管理器")
+                
+            except Exception as adapt_exc:
+                self.logger.debug(f"缓存适配器注册失败: {adapt_exc}")
         except Exception as e:
             self.logger.error(f"缓存系统初始化失败: {e}")
             self.cache_manager = None
@@ -49,8 +66,31 @@ class SmartRetriever:
             memories = []
             memory_ids = set()
             
-            # 0. 优先获取热缓存记忆
-            if self.cache_manager:
+            # 🆕 0. 优先从统一缓存获取热缓存记忆
+            unified_cache = None
+            try:
+                from ..caching.cache_manager import UnifiedCacheManager
+                unified_cache = UnifiedCacheManager.get_instance()
+            except Exception as e:
+                self.logger.debug(f"统一缓存管理器不可用: {e}")
+            
+            if unified_cache:
+                try:
+                    # 尝试从统一缓存获取热缓存记忆
+                    hot_cache_key = "startup_hot_memories"
+                    cached_memories = unified_cache.get(hot_cache_key)
+                    if cached_memories and isinstance(cached_memories, (list, tuple)):
+                        for memory in cached_memories:
+                            if isinstance(memory, dict) and 'id' in memory:
+                                memory['source'] = 'unified_hot_cache'
+                                memories.append(memory)
+                                memory_ids.add(memory['id'])
+                        self.logger.info(f"统一缓存热记忆: {len(cached_memories)} 条")
+                except Exception as e:
+                    self.logger.debug(f"统一缓存获取失败: {e}")
+            
+            # 降级到原始缓存管理器
+            if not memories and self.cache_manager:
                 try:
                     hot_cached_ids = self.cache_manager.get_cached_memories('hot', limit=3)
                     if hot_cached_ids:
@@ -64,7 +104,7 @@ class SmartRetriever:
                     self.logger.warning(f"获取缓存记忆失败: {e}")
             
             # 1. 获取最近5条记忆（排除已缓存的）
-            if memory_ids:
+            if memory_ids and len(memory_ids) > 0:
                 placeholders = ','.join(['?' for _ in memory_ids])
                 recent_query = f"""
                 SELECT id, content, type, role, weight, group_id, 
@@ -86,11 +126,11 @@ class SmartRetriever:
                 recent_rows = self.db_manager.query(recent_query)
             
             # 2. 获取权重最高的记忆（排除已获取的）
-            all_existing_ids = memory_ids.copy()
+            all_existing_ids = memory_ids.copy() if memory_ids else set()
             if recent_rows:
                 all_existing_ids.update([row[0] for row in recent_rows])
             
-            if all_existing_ids:
+            if all_existing_ids and len(all_existing_ids) > 0:
                 placeholders = ','.join(['?' for _ in all_existing_ids])
                 weight_query = f"""
                 SELECT id, content, type, role, weight, group_id, 
@@ -337,6 +377,10 @@ class SmartRetriever:
             return []
         
         try:
+            # 确保memory_ids不为None且为列表
+            if memory_ids is None or not isinstance(memory_ids, list):
+                return []
+            
             placeholders = ','.join(['?' for _ in memory_ids])
             query = f"""
             SELECT id, content, type, role, weight, group_id, 
@@ -367,14 +411,45 @@ class SmartRetriever:
             memory_id: 记忆ID
             access_weight: 访问权重
         """
+        # 优先使用统一缓存管理器
+        try:
+            from ..caching.cache_manager import UnifiedCacheManager
+            unified_cache = UnifiedCacheManager.get_instance()
+            if hasattr(unified_cache, 'record_memory_access'):
+                unified_cache.record_memory_access(memory_id, access_weight)
+                self.logger.debug(f"通过统一缓存记录访问: {memory_id}")
+                return
+        except Exception as e:
+            self.logger.debug(f"统一缓存记录访问失败: {e}")
+        
+        # 降级到原始缓存管理器
         if self.cache_manager:
             try:
                 self.cache_manager.record_memory_access(memory_id, access_weight)
+                self.logger.debug(f"通过原始缓存记录访问: {memory_id}")
             except Exception as e:
-                self.logger.debug(f"记录访问失败: {e}")
+                self.logger.debug(f"原始缓存记录访问失败: {e}")
     
     def get_cache_stats(self) -> Dict[str, Any]:
         """获取缓存统计信息"""
+        # 优先使用统一缓存管理器
+        try:
+            from ..caching.cache_manager import UnifiedCacheManager
+            unified_cache = UnifiedCacheManager.get_instance()
+            if hasattr(unified_cache, 'get_business_cache_stats'):
+                stats = unified_cache.get_business_cache_stats()
+                self.logger.debug("通过统一缓存获取统计信息")
+                return stats
+        except Exception as e:
+            self.logger.debug(f"统一缓存获取统计失败: {e}")
+        
+        # 降级到原始缓存管理器
         if self.cache_manager:
-            return self.cache_manager.get_cache_stats()
+            try:
+                stats = self.cache_manager.get_cache_stats()
+                self.logger.debug("通过原始缓存获取统计信息")
+                return stats
+            except Exception as e:
+                self.logger.debug(f"原始缓存获取统计失败: {e}")
+        
         return {"cache_manager": "not_initialized"} 

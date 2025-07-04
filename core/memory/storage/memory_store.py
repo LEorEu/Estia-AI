@@ -351,18 +351,18 @@ class MemoryStore:
                 return None
             
             # 第四步：在事务中存储向量到memory_vectors表
-                    vector_id = f"vec_{memory_id}"
-                    vector_blob = vector.tobytes()
+            vector_id = f"vec_{memory_id}"
+            vector_blob = vector.tobytes()
             model_name = f"{self.vectorizer.model_type}/{self.vectorizer.model_name}" if self.vectorizer else "unknown"
                     
             result = self.db_manager.execute_in_transaction(
-                        """
-                        INSERT INTO memory_vectors
-                        (id, memory_id, vector, model_name, timestamp)
-                        VALUES (?, ?, ?, ?, ?)
-                        """,
+                """
+                INSERT INTO memory_vectors
+                (id, memory_id, vector, model_name, timestamp)
+                VALUES (?, ?, ?, ?, ?)
+                """,
                 (vector_id, memory_id, vector_blob, model_name, timestamp)
-                    )
+            )
             
             if result is None:
                 self.db_manager.rollback_transaction()
@@ -371,20 +371,20 @@ class MemoryStore:
                     
             # 第五步：尝试FAISS索引操作
             faiss_success = False
-                    if self.vector_index and self.vector_index.available:
+            if self.vector_index and self.vector_index.available:
                 try:
                     faiss_success = self.vector_index.add_vectors(
-                            vectors=vector.reshape(1, -1),
-                            ids=[memory_id]
-                        )
+                        vectors=vector.reshape(1, -1),
+                        ids=[memory_id]
+                    )
                     
                     if faiss_success:
                         # 保存FAISS索引
-                            self.vector_index.save_index()
+                        self.vector_index.save_index()
                         logger.debug(f"FAISS索引添加成功: {memory_id}")
                     else:
                         logger.error(f"FAISS索引添加失败: {memory_id}")
-            except Exception as e:
+                except Exception as e:
                     logger.error(f"FAISS索引操作异常: {e}")
                     faiss_success = False
             else:
@@ -396,7 +396,7 @@ class MemoryStore:
                 # 提交数据库事务
                 if self.db_manager.commit_transaction():
                     logger.info(f"✅ 事务性双写成功: {memory_id}")
-            return memory_id
+                    return memory_id
                 else:
                     logger.error(f"数据库事务提交失败: {memory_id}")
                     return None

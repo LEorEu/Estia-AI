@@ -104,6 +104,11 @@ class EstiaMemorySystem:
             )
             logger.info("✅ FAISS检索初始化成功")
             
+            # 🆕 智能检索器 - 这里会自动注册数据库缓存和检索缓存
+            from .retrieval.smart_retriever import SmartRetriever
+            self.smart_retriever = SmartRetriever(self.db_manager)
+            logger.info("✅ 智能检索器初始化成功")
+            
             # 关联网络
             from .association.network import AssociationNetwork
             self.association_network = AssociationNetwork(self.db_manager)
@@ -138,7 +143,7 @@ class EstiaMemorySystem:
             
             if self.async_initialized:
                 logger.info("🚀 异步评估器启动成功 - 使用稳定启动管理器")
-                else:
+            else:
                 logger.warning("⚠️ 异步评估器启动失败，将在后续尝试重新启动")
                 
         except Exception as e:
@@ -217,12 +222,28 @@ class EstiaMemorySystem:
                     context = {}
                 context['session_id'] = current_session
             
-            # Step 3: 向量化当前输入
-            self.logger.debug("📝 Step 3: 向量化用户输入")
+            # 🆕 Step 3: 使用统一缓存管理器进行向量化
+            self.logger.debug("📝 Step 3: 向量化用户输入 (使用统一缓存)")
             if not self.vectorizer:
                 return self._build_fallback_context(user_input)
             
-            query_vector = self.vectorizer.encode_text(user_input)
+            # 统一缓存管理器进行向量化 - 不再降级
+            from .caching.cache_manager import UnifiedCacheManager
+            unified_cache = UnifiedCacheManager.get_instance()
+            
+            # 尝试从缓存获取向量
+            cached_vector = unified_cache.get(user_input)
+            if cached_vector is not None:
+                query_vector = cached_vector
+                self.logger.debug("✅ 从统一缓存获取向量")
+            else:
+                # 缓存未命中，进行向量化
+                query_vector = self.vectorizer.encode(user_input)
+                if query_vector is not None:
+                    # 将向量存储到统一缓存
+                    unified_cache.put(user_input, query_vector, {"source": "vectorizer"})
+                    self.logger.debug("✅ 向量化完成并存储到统一缓存")
+            
             if query_vector is None:
                 self.logger.warning("向量化失败，使用降级模式")
                 return self._build_fallback_context(user_input)
@@ -231,21 +252,25 @@ class EstiaMemorySystem:
             self.logger.debug("🎯 Step 4: FAISS向量检索")
             similar_memory_ids = []
             if self.faiss_retriever:
-                search_results = self.faiss_retriever.search_similar(query_vector, k=15)
-                similar_memory_ids = [result['memory_id'] for result in search_results 
-                                    if result.get('memory_id')]
+                search_results = self.faiss_retriever.search(query_vector, k=15)
+                similar_memory_ids = [memory_id for memory_id, similarity in search_results 
+                                    if memory_id and similarity > 0.5]
             
             # Step 5: 关联网络拓展 (可选)
             expanded_memory_ids = similar_memory_ids.copy()
             if self.enable_advanced and self.association_network:
                 self.logger.debug("🕸️ Step 5: 关联网络拓展")
                 try:
-                    associated_ids = self.association_network.find_associated_memories(
-                        similar_memory_ids[:5], depth=2, max_results=10
-                    )
-                    expanded_memory_ids.extend(associated_ids)
-                    # 去重
-                    expanded_memory_ids = list(dict.fromkeys(expanded_memory_ids))
+                    # get_related_memories返回字典列表，需要提取memory_id
+                    if similar_memory_ids:
+                        associated_memories = self.association_network.get_related_memories(
+                            similar_memory_ids[0], depth=2, min_strength=0.3
+                        )
+                        associated_ids = [mem.get('memory_id') for mem in associated_memories 
+                                        if mem.get('memory_id')]
+                        expanded_memory_ids.extend(associated_ids)
+                        # 去重
+                        expanded_memory_ids = list(dict.fromkeys(expanded_memory_ids))
                 except Exception as e:
                     self.logger.warning(f"关联网络拓展失败: {e}")
             
@@ -325,6 +350,14 @@ class EstiaMemorySystem:
             if context:
                 context['session_id'] = session_id
             
+            # 🆕 使用统一缓存管理器记录访问
+            unified_cache = None
+            try:
+                from .caching.cache_manager import UnifiedCacheManager
+                unified_cache = UnifiedCacheManager.get_instance()
+            except Exception as e:
+                self.logger.debug(f"统一缓存管理器不可用: {e}")
+            
             # 🔥 Step 12: 使用MemoryStore保存对话（包含向量化）
             user_memory_id = self.memory_store.add_interaction_memory(
                 content=user_input,
@@ -343,6 +376,17 @@ class EstiaMemorySystem:
                 timestamp=timestamp,
                 weight=5.0
             )
+            
+            # 🆕 通过统一缓存记录记忆访问
+            if unified_cache and user_memory_id:
+                try:
+                    unified_cache.put(f"memory_access_{user_memory_id}", {
+                        "memory_id": user_memory_id,
+                        "access_time": timestamp,
+                        "access_weight": 1.0
+                    }, {"access_type": "store_interaction"})
+                except Exception as e:
+                    self.logger.debug(f"统一缓存记录访问失败: {e}")
             
             logger.debug(f"✅ Step 12: 对话存储完成 (Session: {session_id}, 用户: {user_memory_id}, AI: {ai_memory_id})")
             
@@ -506,6 +550,14 @@ class EstiaMemorySystem:
             }
         }
         
+        # 🆕 添加统一缓存统计
+        try:
+            from .caching.cache_manager import UnifiedCacheManager
+            unified_cache = UnifiedCacheManager.get_instance()
+            stats['unified_cache'] = unified_cache.get_stats()
+        except Exception as e:
+            stats['unified_cache'] = {"error": str(e)}
+        
         # 获取记忆统计
         if self.memory_store and self.memory_store.db_manager:
             try:
@@ -536,7 +588,7 @@ class EstiaMemorySystem:
                     logger.info("✅ 异步评估器已通过启动管理器关闭")
                 except Exception as e:
                     logger.warning(f"启动管理器关闭失败，尝试直接关闭: {e}")
-                await self.async_evaluator.stop()
+                    await self.async_evaluator.stop()
                     logger.info("✅ 异步评估器已直接关闭")
             
             if self.memory_store:
