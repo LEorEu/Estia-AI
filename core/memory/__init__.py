@@ -107,7 +107,7 @@ try:
     
     logger.info("✅ Estia记忆系统模块加载成功")
     
-except ImportError as e:
+except Exception as e:
     logger.warning(f"部分记忆组件导入失败: {e}")
     # 基础导入
     EstiaMemorySystem = None

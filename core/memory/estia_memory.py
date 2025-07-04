@@ -104,6 +104,11 @@ class EstiaMemorySystem:
             )
             logger.info("✅ FAISS检索初始化成功")
             
+            # 🆕 智能检索器 - 这里会自动注册数据库缓存和检索缓存
+            from .retrieval.smart_retriever import SmartRetriever
+            self.smart_retriever = SmartRetriever(self.db_manager)
+            logger.info("✅ 智能检索器初始化成功")
+            
             # 关联网络
             from .association.network import AssociationNetwork
             self.association_network = AssociationNetwork(self.db_manager)
@@ -124,44 +129,35 @@ class EstiaMemorySystem:
             self.enable_advanced = False
     
     def _initialize_async_evaluator(self):
-        """🔥 初始化异步评估器 - Step 11-13的核心"""
+        """🔥 初始化异步评估器 - Step 11-13的核心 - 使用稳定的启动管理器"""
         try:
             from .evaluator.async_evaluator import AsyncMemoryEvaluator
-            self.async_evaluator = AsyncMemoryEvaluator(self.db_manager)
-            logger.info("✅ 异步评估器初始化成功")
+            from .evaluator.async_startup_manager import initialize_async_evaluator_safely
             
-            # 启动异步评估器（如果在异步环境中）
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    # 在运行中的事件循环中创建任务
-                    asyncio.create_task(self._start_async_evaluator())
-                else:
-                    # 同步启动
-                    asyncio.run(self._start_async_evaluator())
-            except RuntimeError:
-                # 没有事件循环，延迟启动
-                logger.info("⏳ 异步评估器将在第一次使用时启动")
+            # 创建异步评估器实例
+            self.async_evaluator = AsyncMemoryEvaluator(self.db_manager)
+            logger.info("✅ 异步评估器实例创建成功")
+            
+            # 使用稳定的启动管理器初始化
+            self.async_initialized = initialize_async_evaluator_safely(self.async_evaluator)
+            
+            if self.async_initialized:
+                logger.info("🚀 异步评估器启动成功 - 使用稳定启动管理器")
+            else:
+                logger.warning("⚠️ 异步评估器启动失败，将在后续尝试重新启动")
                 
         except Exception as e:
             logger.warning(f"异步评估器初始化失败: {e}")
             self.async_evaluator = None
-    
-    async def _start_async_evaluator(self):
-        """启动异步评估器"""
-        try:
-            if self.async_evaluator and not self.async_initialized:
-                await self.async_evaluator.start()
-                self.async_initialized = True
-                logger.info("🚀 异步评估器启动成功")
-        except Exception as e:
-            logger.error(f"异步评估器启动失败: {e}")
             self.async_initialized = False
     
-    async def ensure_async_initialized(self):
-        """确保异步组件已初始化"""
+    def ensure_async_initialized(self):
+        """确保异步组件已初始化 - 简化版本"""
         if not self.async_initialized and self.async_evaluator:
-            await self._start_async_evaluator()
+            from .evaluator.async_startup_manager import initialize_async_evaluator_safely
+            self.async_initialized = initialize_async_evaluator_safely(self.async_evaluator)
+            
+        return self.async_initialized
     
     def start_new_session(self, session_id: str = None) -> str:
         """开始新的对话会话"""
@@ -226,12 +222,28 @@ class EstiaMemorySystem:
                     context = {}
                 context['session_id'] = current_session
             
-            # Step 3: 向量化当前输入
-            self.logger.debug("📝 Step 3: 向量化用户输入")
+            # 🆕 Step 3: 使用统一缓存管理器进行向量化
+            self.logger.debug("📝 Step 3: 向量化用户输入 (使用统一缓存)")
             if not self.vectorizer:
                 return self._build_fallback_context(user_input)
             
-            query_vector = self.vectorizer.encode_text(user_input)
+            # 统一缓存管理器进行向量化 - 不再降级
+            from .caching.cache_manager import UnifiedCacheManager
+            unified_cache = UnifiedCacheManager.get_instance()
+            
+            # 尝试从缓存获取向量
+            cached_vector = unified_cache.get(user_input)
+            if cached_vector is not None:
+                query_vector = cached_vector
+                self.logger.debug("✅ 从统一缓存获取向量")
+            else:
+                # 缓存未命中，进行向量化
+                query_vector = self.vectorizer.encode(user_input)
+                if query_vector is not None:
+                    # 将向量存储到统一缓存
+                    unified_cache.put(user_input, query_vector, {"source": "vectorizer"})
+                    self.logger.debug("✅ 向量化完成并存储到统一缓存")
+            
             if query_vector is None:
                 self.logger.warning("向量化失败，使用降级模式")
                 return self._build_fallback_context(user_input)
@@ -240,21 +252,25 @@ class EstiaMemorySystem:
             self.logger.debug("🎯 Step 4: FAISS向量检索")
             similar_memory_ids = []
             if self.faiss_retriever:
-                search_results = self.faiss_retriever.search_similar(query_vector, k=15)
-                similar_memory_ids = [result['memory_id'] for result in search_results 
-                                    if result.get('memory_id')]
+                search_results = self.faiss_retriever.search(query_vector, k=15)
+                similar_memory_ids = [memory_id for memory_id, similarity in search_results 
+                                    if memory_id and similarity > 0.5]
             
             # Step 5: 关联网络拓展 (可选)
             expanded_memory_ids = similar_memory_ids.copy()
             if self.enable_advanced and self.association_network:
                 self.logger.debug("🕸️ Step 5: 关联网络拓展")
                 try:
-                    associated_ids = self.association_network.find_associated_memories(
-                        similar_memory_ids[:5], depth=2, max_results=10
-                    )
-                    expanded_memory_ids.extend(associated_ids)
-                    # 去重
-                    expanded_memory_ids = list(dict.fromkeys(expanded_memory_ids))
+                    # get_related_memories返回字典列表，需要提取memory_id
+                    if similar_memory_ids:
+                        associated_memories = self.association_network.get_related_memories(
+                            similar_memory_ids[0], depth=2, min_strength=0.3
+                        )
+                        associated_ids = [mem.get('memory_id') for mem in associated_memories 
+                                        if mem.get('memory_id')]
+                        expanded_memory_ids.extend(associated_ids)
+                        # 去重
+                        expanded_memory_ids = list(dict.fromkeys(expanded_memory_ids))
                 except Exception as e:
                     self.logger.warning(f"关联网络拓展失败: {e}")
             
@@ -334,6 +350,14 @@ class EstiaMemorySystem:
             if context:
                 context['session_id'] = session_id
             
+            # 🆕 使用统一缓存管理器记录访问
+            unified_cache = None
+            try:
+                from .caching.cache_manager import UnifiedCacheManager
+                unified_cache = UnifiedCacheManager.get_instance()
+            except Exception as e:
+                self.logger.debug(f"统一缓存管理器不可用: {e}")
+            
             # 🔥 Step 12: 使用MemoryStore保存对话（包含向量化）
             user_memory_id = self.memory_store.add_interaction_memory(
                 content=user_input,
@@ -352,6 +376,17 @@ class EstiaMemorySystem:
                 timestamp=timestamp,
                 weight=5.0
             )
+            
+            # 🆕 通过统一缓存记录记忆访问
+            if unified_cache and user_memory_id:
+                try:
+                    unified_cache.put(f"memory_access_{user_memory_id}", {
+                        "memory_id": user_memory_id,
+                        "access_time": timestamp,
+                        "access_weight": 1.0
+                    }, {"access_type": "store_interaction"})
+                except Exception as e:
+                    self.logger.debug(f"统一缓存记录访问失败: {e}")
             
             logger.debug(f"✅ Step 12: 对话存储完成 (Session: {session_id}, 用户: {user_memory_id}, AI: {ai_memory_id})")
             
@@ -373,43 +408,36 @@ class EstiaMemorySystem:
     
     def _safe_trigger_async_evaluation(self, user_input: str, ai_response: str, 
                                      session_id: str, context_memories: List):
-        """安全地触发异步评估"""
+        """安全地触发异步评估 - 使用稳定的启动管理器"""
         try:
-            # 检查是否有运行中的事件循环
-            try:
-                loop = asyncio.get_running_loop()
-                # 如果有运行中的事件循环，创建任务
-                asyncio.create_task(self._queue_for_async_evaluation(
+            # 确保异步评估器已初始化
+            if not self.ensure_async_initialized():
+                logger.warning("异步评估器未就绪，跳过异步评估")
+                return
+            
+            # 使用启动管理器安全地加入评估任务
+            from .evaluator.async_startup_manager import queue_evaluation_task_safely
+            
+            # 创建评估协程
+            evaluation_coro = self._queue_for_async_evaluation(
                     user_input, ai_response, session_id, context_memories
-                ))
-                logger.debug("✅ 异步评估任务已创建")
-            except RuntimeError:
-                # 没有运行中的事件循环，使用线程安全的方式
-                import threading
-                
-                def run_async_evaluation():
-                    try:
-                        asyncio.run(self._queue_for_async_evaluation(
-                            user_input, ai_response, session_id, context_memories
-                        ))
-                    except Exception as e:
-                        logger.error(f"异步评估执行失败: {e}")
-                
-                # 在新线程中运行
-                thread = threading.Thread(target=run_async_evaluation, daemon=True)
-                thread.start()
-                logger.debug("✅ 异步评估线程已启动")
+            )
+            
+            # 安全地加入队列
+            success = queue_evaluation_task_safely(evaluation_coro)
+            
+            if success:
+                logger.debug("✅ 异步评估任务已安全加入队列")
+            else:
+                logger.warning("❌ 异步评估任务加入失败")
                 
         except Exception as e:
             logger.error(f"异步评估触发失败: {e}")
     
     async def _queue_for_async_evaluation(self, user_input: str, ai_response: str, 
                                         session_id: str, context_memories: List):
-        """将对话加入异步评估队列"""
+        """将对话加入异步评估队列 - 简化版本"""
         try:
-            # 确保异步评估器已启动
-            await self.ensure_async_initialized()
-            
             if self.async_evaluator and self.async_initialized:
                 await self.async_evaluator.queue_dialogue_for_evaluation(
                     user_input=user_input,
@@ -522,6 +550,14 @@ class EstiaMemorySystem:
             }
         }
         
+        # 🆕 添加统一缓存统计
+        try:
+            from .caching.cache_manager import UnifiedCacheManager
+            unified_cache = UnifiedCacheManager.get_instance()
+            stats['unified_cache'] = unified_cache.get_stats()
+        except Exception as e:
+            stats['unified_cache'] = {"error": str(e)}
+        
         # 获取记忆统计
         if self.memory_store and self.memory_store.db_manager:
             try:
@@ -541,11 +577,19 @@ class EstiaMemorySystem:
         return stats
     
     async def shutdown(self):
-        """🔥 优雅关闭系统"""
+        """🔥 优雅关闭系统 - 使用启动管理器"""
         try:
+            # 使用启动管理器关闭异步评估器
             if self.async_evaluator and self.async_initialized:
-                await self.async_evaluator.stop()
-                logger.info("✅ 异步评估器已停止")
+                try:
+                    from .evaluator.async_startup_manager import get_startup_manager
+                    startup_manager = get_startup_manager()
+                    startup_manager.shutdown()
+                    logger.info("✅ 异步评估器已通过启动管理器关闭")
+                except Exception as e:
+                    logger.warning(f"启动管理器关闭失败，尝试直接关闭: {e}")
+                    await self.async_evaluator.stop()
+                    logger.info("✅ 异步评估器已直接关闭")
             
             if self.memory_store:
                 self.memory_store.close()

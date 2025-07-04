@@ -98,6 +98,9 @@ class TextVectorizer:
             self.cache = EmbeddingCache(cache_dir=self.cache_dir)
             logger.info("已启用增强版记忆缓存")
         
+        # 🔥 新增：自动注册缓存适配器到统一缓存管理器
+        self._register_cache_adapters()
+        
         # 加载模型
         self._load_model()
         
@@ -106,6 +109,35 @@ class TextVectorizer:
         
         logger.info(f"文本向量化器初始化完成，使用模型: {self.model_type}/{self.model_name}")
         logger.info(f"缓存目录: {self.cache_dir}")
+    
+    def _register_cache_adapters(self) -> None:
+        """自动注册缓存适配器到统一缓存管理器"""
+        if not self.use_cache:
+            return
+            
+        try:
+            from ..caching.cache_manager import UnifiedCacheManager
+            from ..caching.cache_adapters import EnhancedMemoryCacheAdapter
+            
+            unified_cache = UnifiedCacheManager.get_instance()
+            
+            # 检查是否已经注册了向量缓存适配器
+            registered_caches = list(unified_cache.caches.keys())
+            if "embedding_cache" not in registered_caches and self.cache:
+                # 创建并注册向量缓存适配器
+                vector_adapter = EnhancedMemoryCacheAdapter(
+                    source_cache=self.cache,
+                    cache_id="embedding_cache",
+                    auto_register=False  # 手动注册，避免重复
+                )
+                unified_cache.register_cache(vector_adapter)
+                logger.info("✅ 已自动注册向量缓存适配器到统一缓存管理器")
+            else:
+                logger.debug("向量缓存适配器已存在或无需注册")
+                
+        except Exception as e:
+            logger.warning(f"注册缓存适配器失败: {e}")
+            # 不影响主要功能，继续执行
     
     def _load_model(self) -> None:
         """加载Embedding模型"""
@@ -260,8 +292,16 @@ class TextVectorizer:
             logger.warning(f"权重数量({len(memory_weights)})与文本数量({len(texts)})不匹配，使用默认权重")
             memory_weights = [1.0] * len(texts)
         
-        # 检查增强缓存
-        if self.use_cache and self.cache:
+        # 尝试使用统一缓存管理器
+        unified_cache = None
+        try:
+            from ..caching.cache_manager import UnifiedCacheManager
+            unified_cache = UnifiedCacheManager.get_instance()
+        except Exception as e:
+            logger.debug(f"统一缓存管理器不可用: {e}")
+        
+        # 检查缓存
+        if self.use_cache and (unified_cache or self.cache):
             # 尝试从缓存获取所有向量
             cached_vectors = []
             texts_to_encode = []
@@ -269,7 +309,22 @@ class TextVectorizer:
             weights_to_encode = []
             
             for i, (text, weight) in enumerate(zip(texts, memory_weights)):
-                vector = self.cache.get(text, memory_weight=weight)
+                vector = None
+                
+                # 优先使用统一缓存管理器
+                if unified_cache:
+                    try:
+                        vector = unified_cache.get(text)
+                    except Exception as e:
+                        logger.debug(f"统一缓存获取失败: {e}")
+                
+                # 降级到直接缓存
+                if vector is None and self.cache:
+                    try:
+                        vector = self.cache.get(text, memory_weight=weight)
+                    except Exception as e:
+                        logger.debug(f"直接缓存获取失败: {e}")
+                
                 if vector is not None:
                     cached_vectors.append((i, vector))
                 else:
@@ -294,7 +349,19 @@ class TextVectorizer:
                 
                 # 将新向量添加到缓存
                 for text, vector, weight in zip(texts_to_encode, new_vectors, weights_to_encode):
-                    self.cache.put(text, vector, memory_weight=weight)
+                    # 优先使用统一缓存管理器
+                    if unified_cache:
+                        try:
+                            unified_cache.put(text, vector, {"source": "vectorizer", "weight": weight})
+                        except Exception as e:
+                            logger.debug(f"统一缓存存储失败: {e}")
+                    
+                    # 降级到直接缓存
+                    if self.cache:
+                        try:
+                            self.cache.put(text, vector, memory_weight=weight)
+                        except Exception as e:
+                            logger.debug(f"直接缓存存储失败: {e}")
                 
                 # 构建完整结果数组
                 results = np.zeros((len(texts), self.vector_dim), dtype=np.float32)
@@ -313,9 +380,21 @@ class TextVectorizer:
         vectors = self._encode_texts(texts, batch_size, show_progress)
         
         # 如果使用缓存，保存新编码的向量
-        if self.use_cache and self.cache:
+        if self.use_cache:
             for text, vector, weight in zip(texts, vectors, memory_weights):
-                self.cache.put(text, vector, memory_weight=weight)
+                # 优先使用统一缓存管理器
+                if unified_cache:
+                    try:
+                        unified_cache.put(text, vector, {"source": "vectorizer", "weight": weight})
+                    except Exception as e:
+                        logger.debug(f"统一缓存存储失败: {e}")
+                
+                # 降级到直接缓存
+                if self.cache:
+                    try:
+                        self.cache.put(text, vector, memory_weight=weight)
+                    except Exception as e:
+                        logger.debug(f"直接缓存存储失败: {e}")
         
         return vectors[0] if is_single_text else vectors
     
@@ -470,26 +549,74 @@ class TextVectorizer:
         返回:
             List[Dict]: 匹配的记忆列表
         """
-        if not self.use_cache or not self.cache:
-            logger.warning("缓存未启用，无法搜索缓存记忆")
-            return []
+        # 尝试使用统一缓存管理器
+        unified_cache = None
+        try:
+            from ..caching.cache_manager import UnifiedCacheManager
+            unified_cache = UnifiedCacheManager.get_instance()
+        except Exception as e:
+            logger.debug(f"统一缓存管理器不可用: {e}")
         
-        return self.cache.search_by_content(query, limit)
+        if unified_cache:
+            try:
+                # 统一缓存管理器目前不支持内容搜索，降级到直接缓存
+                if self.use_cache and self.cache:
+                    return self.cache.search_by_content(query, limit)
+            except Exception as e:
+                logger.debug(f"统一缓存搜索失败: {e}")
+        elif self.use_cache and self.cache:
+            return self.cache.search_by_content(query, limit)
+        
+        logger.warning("缓存未启用或不可用，无法搜索缓存记忆")
+        return []
     
     def get_cache_stats(self) -> Dict[str, Any]:
         """获取缓存统计信息"""
-        if not self.use_cache or not self.cache:
-            return {"cache_enabled": False}
+        # 尝试使用统一缓存管理器
+        unified_cache = None
+        try:
+            from ..caching.cache_manager import UnifiedCacheManager
+            unified_cache = UnifiedCacheManager.get_instance()
+        except Exception as e:
+            logger.debug(f"统一缓存管理器不可用: {e}")
         
-        stats = self.cache.get_stats()
-        stats["cache_enabled"] = True
-        return stats
+        if unified_cache:
+            try:
+                stats = unified_cache.get_stats()
+                stats["cache_enabled"] = True
+                stats["cache_type"] = "unified"
+                return stats
+            except Exception as e:
+                logger.debug(f"统一缓存统计获取失败: {e}")
+        
+        if self.use_cache and self.cache:
+            stats = self.cache.get_stats()
+            stats["cache_enabled"] = True
+            stats["cache_type"] = "direct"
+            return stats
+        
+        return {"cache_enabled": False, "cache_type": "none"}
     
     def clear_cache(self) -> None:
         """清空缓存"""
+        # 尝试使用统一缓存管理器
+        unified_cache = None
+        try:
+            from ..caching.cache_manager import UnifiedCacheManager
+            unified_cache = UnifiedCacheManager.get_instance()
+        except Exception as e:
+            logger.debug(f"统一缓存管理器不可用: {e}")
+        
+        if unified_cache:
+            try:
+                unified_cache.clear_all()
+                logger.info("统一缓存已清空")
+            except Exception as e:
+                logger.debug(f"统一缓存清空失败: {e}")
+        
         if self.use_cache and self.cache:
             self.cache.clear_all_cache()
-            logger.info("向量化器缓存已清空")
+            logger.info("直接缓存已清空")
 
 # 模块测试代码
 if __name__ == "__main__":

@@ -376,6 +376,91 @@ class DatabaseManager:
             logger.error(f"执行事务失败: {e}")
             return False
     
+    def begin_transaction(self):
+        """
+        开始事务
+        
+        返回:
+            bool: 是否成功开始事务
+        """
+        if not self._ensure_connection():
+            logger.error("无法开始事务：未连接到数据库")
+            return False
+        
+        try:
+            # SQLite默认就是自动开始事务，这里显式开始
+            self.cursor.execute("BEGIN TRANSACTION")
+            logger.debug("开始数据库事务")
+            return True
+        except Exception as e:
+            logger.error(f"开始事务失败: {e}")
+            return False
+    
+    def commit_transaction(self):
+        """
+        提交事务
+        
+        返回:
+            bool: 是否成功提交事务
+        """
+        if not self.conn:
+            logger.error("无法提交事务：数据库未连接")
+            return False
+        
+        try:
+            self.conn.commit()
+            logger.debug("数据库事务已提交")
+            return True
+        except Exception as e:
+            logger.error(f"提交事务失败: {e}")
+            return False
+    
+    def rollback_transaction(self):
+        """
+        回滚事务
+        
+        返回:
+            bool: 是否成功回滚事务
+        """
+        if not self.conn:
+            logger.error("无法回滚事务：数据库未连接")
+            return False
+        
+        try:
+            self.conn.rollback()
+            logger.debug("数据库事务已回滚")
+            return True
+        except Exception as e:
+            logger.error(f"回滚事务失败: {e}")
+            return False
+    
+    def execute_in_transaction(self, query, params=None):
+        """
+        在当前事务中执行SQL语句（不自动提交）
+        
+        参数:
+            query: SQL查询语句
+            params: 查询参数
+            
+        返回:
+            查询结果或None
+        """
+        if not self._ensure_connection():
+            logger.error("无法执行查询：未连接到数据库")
+            return None
+        
+        try:
+            if params:
+                self.cursor.execute(query, params)
+            else:
+                self.cursor.execute(query)
+            
+            # 不自动提交，等待外部调用commit_transaction
+            return self.cursor.fetchall()
+        except Exception as e:
+            logger.error(f"在事务中执行查询失败: {e}")
+            return None
+    
     def backup_database(self, backup_path=None):
         """
         备份数据库

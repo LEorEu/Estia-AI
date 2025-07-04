@@ -104,11 +104,12 @@ class MemoryStore:
             # 初始化新的数据库管理器
             self._init_db_manager()
         
-        # 初始化向量索引管理器
-        self._init_vector_index()
-        
+        # 🔥 修复：先初始化向量化器，再初始化向量索引
         # 初始化文本向量化器
         self._init_vectorizer(model_type, model_name)
+        
+        # 初始化向量索引管理器（使用向量化器的实际维度）
+        self._init_vector_index()
         
         logger.info(f"记忆存储管理器初始化完成，数据库: {db_path}, 向量索引: {index_path}")
     
@@ -137,9 +138,17 @@ class MemoryStore:
                 logger.error("VectorIndexManager类未导入")
                 return
                 
+            # 🔥 修复：使用向量化器的实际维度
+            actual_vector_dim = self.vector_dim  # 默认值
+            if self.vectorizer and hasattr(self.vectorizer, 'vector_dim'):
+                actual_vector_dim = self.vectorizer.vector_dim
+                logger.info(f"使用向量化器的实际维度: {actual_vector_dim}")
+            else:
+                logger.warning(f"无法获取向量化器维度，使用默认值: {actual_vector_dim}")
+                
             self.vector_index = VectorIndexManager(
                 index_path=self.index_path,
-                vector_dim=self.vector_dim
+                vector_dim=actual_vector_dim
             )
             
             if self.vector_index and not self.vector_index.available:
@@ -278,7 +287,7 @@ class MemoryStore:
     def add_interaction_memory(self, content: str, memory_type: str, role: str,
                               session_id: str, timestamp: float, weight: float = 5.0) -> Optional[str]:
         """
-        添加交互记忆（兼容EstiaMemorySystem接口）
+        添加交互记忆（使用事务性双写机制）
         
         参数:
             content: 记忆内容
@@ -299,11 +308,19 @@ class MemoryStore:
             logger.error("数据库管理器未初始化，无法添加记忆")
             return None
             
-        try:
             # 生成记忆ID
             memory_id = f"mem_{uuid.uuid4().hex[:12]}"
             
-            # 准备元数据
+        # 🔥 事务性双写机制开始
+        logger.debug(f"开始事务性双写操作: {memory_id}")
+        
+        # 开始数据库事务
+        if not self.db_manager.begin_transaction():
+            logger.error("无法开始数据库事务")
+            return None
+            
+        try:
+            # 第一步：准备元数据
             metadata = {
                 "session_id": session_id,
                 "memory_type": memory_type,
@@ -311,8 +328,15 @@ class MemoryStore:
             }
             metadata_json = json.dumps(metadata, ensure_ascii=False)
             
-            # 存储到数据库
-            self.db_manager.execute_query(
+            # 第二步：向量化（在事务外进行，避免长时间锁定）
+            vector = self._vectorize_text(content)
+            if vector is None:
+                self.db_manager.rollback_transaction()
+                logger.error(f"文本向量化失败，回滚事务: {memory_id}")
+                return None
+            
+            # 第三步：在事务中存储到memories表
+            result = self.db_manager.execute_in_transaction(
                 """
                 INSERT INTO memories 
                 (id, content, type, role, session_id, timestamp, weight, last_accessed, metadata)
@@ -321,45 +345,71 @@ class MemoryStore:
                 (memory_id, content, memory_type, role, session_id, timestamp, weight, timestamp, metadata_json)
             )
             
-            # 提交事务
-            if self.db_manager.conn:
-                self.db_manager.conn.commit()
+            if result is None:
+                self.db_manager.rollback_transaction()
+                logger.error(f"写入memories表失败，回滚事务: {memory_id}")
+                return None
             
-            # 向量化和索引（异步进行，避免阻塞）
-            try:
-                vector = self._vectorize_text(content)
-                if vector is not None:
-                    # 存储向量到数据库
-                    vector_id = f"vec_{memory_id}"
-                    vector_blob = vector.tobytes()
+            # 第四步：在事务中存储向量到memory_vectors表
+            vector_id = f"vec_{memory_id}"
+            vector_blob = vector.tobytes()
+            model_name = f"{self.vectorizer.model_type}/{self.vectorizer.model_name}" if self.vectorizer else "unknown"
                     
-                    self.db_manager.execute_query(
-                        """
-                        INSERT INTO memory_vectors
-                        (id, memory_id, vector, model_name, timestamp)
-                        VALUES (?, ?, ?, ?, ?)
-                        """,
-                        (vector_id, memory_id, vector_blob, 
-                         f"{self.vectorizer.model_type}/{self.vectorizer.model_name}" if self.vectorizer else "unknown", 
-                         timestamp)
+            result = self.db_manager.execute_in_transaction(
+                """
+                INSERT INTO memory_vectors
+                (id, memory_id, vector, model_name, timestamp)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (vector_id, memory_id, vector_blob, model_name, timestamp)
+            )
+            
+            if result is None:
+                self.db_manager.rollback_transaction()
+                logger.error(f"写入memory_vectors表失败，回滚事务: {memory_id}")
+                return None
+                    
+            # 第五步：尝试FAISS索引操作
+            faiss_success = False
+            if self.vector_index and self.vector_index.available:
+                try:
+                    faiss_success = self.vector_index.add_vectors(
+                        vectors=vector.reshape(1, -1),
+                        ids=[memory_id]
                     )
                     
-                    # 添加到FAISS索引
-                    if self.vector_index and self.vector_index.available:
-                        success = self.vector_index.add_vectors(
-                            vectors=vector.reshape(1, -1),
-                            ids=[memory_id]
-                        )
-                        if success:
-                            self.vector_index.save_index()
-            except Exception as e:
-                logger.warning(f"向量化处理失败，但记忆已保存: {e}")
+                    if faiss_success:
+                        # 保存FAISS索引
+                        self.vector_index.save_index()
+                        logger.debug(f"FAISS索引添加成功: {memory_id}")
+                    else:
+                        logger.error(f"FAISS索引添加失败: {memory_id}")
+                except Exception as e:
+                    logger.error(f"FAISS索引操作异常: {e}")
+                    faiss_success = False
+            else:
+                logger.warning("FAISS索引不可用，跳过向量索引")
+                faiss_success = True  # 允许在没有FAISS的情况下继续
             
-            logger.debug(f"✅ 交互记忆存储成功: {memory_id}")
-            return memory_id
+            # 第六步：根据FAISS操作结果决定提交或回滚
+            if faiss_success:
+                # 提交数据库事务
+                if self.db_manager.commit_transaction():
+                    logger.info(f"✅ 事务性双写成功: {memory_id}")
+                    return memory_id
+                else:
+                    logger.error(f"数据库事务提交失败: {memory_id}")
+                    return None
+            else:
+                # FAISS失败，回滚数据库事务
+                self.db_manager.rollback_transaction()
+                logger.error(f"❌ FAISS索引失败，回滚数据库事务: {memory_id}")
+                return None
             
         except Exception as e:
-            logger.error(f"交互记忆存储失败: {e}")
+            # 异常情况下回滚事务
+            self.db_manager.rollback_transaction()
+            logger.error(f"❌ 交互记忆存储异常，已回滚事务: {e}")
             return None
     
     def _vectorize_text(self, text: str) -> np.ndarray:
@@ -800,19 +850,317 @@ class MemoryStore:
             return []
     
     def close(self):
-        """关闭记忆存储管理器，保存所有数据"""
+        """
+        关闭资源
+        """
         try:
-            # 保存向量索引
             if self.vector_index:
-                self.vector_index.save_index()
-                
-            # 关闭数据库连接
+                self.vector_index.close()
             if self.db_manager:
                 self.db_manager.close()
-                
-            logger.info("记忆存储管理器已关闭")
         except Exception as e:
-            logger.error(f"关闭记忆存储管理器失败: {e}")
+            logger.error(f"关闭MemoryStore失败: {e}")
+    
+    def check_data_consistency(self) -> Dict[str, Any]:
+        """
+        检查数据一致性
+        
+        返回:
+            Dict[str, Any]: 一致性检查报告
+        """
+        report = {
+            "timestamp": datetime.now().isoformat(),
+            "status": "unknown",
+            "total_memories": 0,
+            "total_vectors": 0,
+            "total_faiss_vectors": 0,
+            "missing_vectors": [],
+            "orphaned_vectors": [],
+            "faiss_sync_issues": [],
+            "recommendations": []
+        }
+        
+        try:
+            # 检查memories表记录数
+            memories_result = self.db_manager.query("SELECT COUNT(*) FROM memories")
+            report["total_memories"] = memories_result[0][0] if memories_result else 0
+            
+            # 检查memory_vectors表记录数
+            vectors_result = self.db_manager.query("SELECT COUNT(*) FROM memory_vectors")
+            report["total_vectors"] = vectors_result[0][0] if vectors_result else 0
+            
+            # 检查FAISS索引记录数
+            if self.vector_index and self.vector_index.available:
+                report["total_faiss_vectors"] = self.vector_index.get_total_count()
+            else:
+                report["total_faiss_vectors"] = -1  # 表示不可用
+            
+            # 查找缺失向量的记忆
+            missing_vectors_query = """
+            SELECT m.id, m.content
+            FROM memories m
+            LEFT JOIN memory_vectors mv ON m.id = mv.memory_id
+            WHERE mv.memory_id IS NULL
+            """
+            missing_result = self.db_manager.query(missing_vectors_query)
+            if missing_result:
+                report["missing_vectors"] = [
+                    {"memory_id": row[0], "content": row[1][:50] + "..."}
+                    for row in missing_result
+                ]
+            
+            # 查找孤立的向量（没有对应记忆）
+            orphaned_vectors_query = """
+            SELECT mv.id, mv.memory_id
+            FROM memory_vectors mv
+            LEFT JOIN memories m ON mv.memory_id = m.id
+            WHERE m.id IS NULL
+            """
+            orphaned_result = self.db_manager.query(orphaned_vectors_query)
+            if orphaned_result:
+                report["orphaned_vectors"] = [
+                    {"vector_id": row[0], "memory_id": row[1]}
+                    for row in orphaned_result
+                ]
+            
+            # 检查FAISS同步问题
+            if report["total_faiss_vectors"] >= 0:
+                db_vector_count = report["total_vectors"]
+                faiss_vector_count = report["total_faiss_vectors"]
+                
+                if db_vector_count != faiss_vector_count:
+                    report["faiss_sync_issues"].append({
+                        "issue": "count_mismatch",
+                        "db_count": db_vector_count,
+                        "faiss_count": faiss_vector_count,
+                        "difference": abs(db_vector_count - faiss_vector_count)
+                    })
+            
+            # 生成状态评估
+            issues_count = (
+                len(report["missing_vectors"]) +
+                len(report["orphaned_vectors"]) +
+                len(report["faiss_sync_issues"])
+            )
+            
+            if issues_count == 0:
+                report["status"] = "healthy"
+            elif issues_count <= 3:
+                report["status"] = "warning"
+            else:
+                report["status"] = "critical"
+            
+            # 生成建议
+            if report["missing_vectors"]:
+                report["recommendations"].append(
+                    f"修复 {len(report['missing_vectors'])} 个缺失向量的记忆"
+                )
+            
+            if report["orphaned_vectors"]:
+                report["recommendations"].append(
+                    f"清理 {len(report['orphaned_vectors'])} 个孤立向量"
+                )
+            
+            if report["faiss_sync_issues"]:
+                report["recommendations"].append(
+                    "重建FAISS索引以修复同步问题"
+                )
+            
+            logger.info(f"数据一致性检查完成，状态: {report['status']}")
+            return report
+            
+        except Exception as e:
+            logger.error(f"数据一致性检查失败: {e}")
+            report["status"] = "error"
+            report["error"] = str(e)
+            return report
+    
+    def repair_data_consistency(self, repair_options: Dict[str, bool] = None) -> Dict[str, Any]:
+        """
+        修复数据一致性问题
+        
+        参数:
+            repair_options: 修复选项
+                - fix_missing_vectors: 为缺失向量的记忆生成向量
+                - remove_orphaned_vectors: 删除孤立向量
+                - rebuild_faiss: 重建FAISS索引
+        
+        返回:
+            Dict[str, Any]: 修复结果报告
+        """
+        if repair_options is None:
+            repair_options = {
+                "fix_missing_vectors": True,
+                "remove_orphaned_vectors": True,
+                "rebuild_faiss": True
+            }
+        
+        repair_report = {
+            "timestamp": datetime.now().isoformat(),
+            "operations": [],
+            "success_count": 0,
+            "error_count": 0,
+            "status": "unknown"
+        }
+        
+        try:
+            # 首先检查当前状态
+            consistency_report = self.check_data_consistency()
+            
+            # 修复缺失向量
+            if repair_options.get("fix_missing_vectors", False) and consistency_report["missing_vectors"]:
+                logger.info("开始修复缺失向量...")
+                for missing in consistency_report["missing_vectors"]:
+                    try:
+                        memory_id = missing["memory_id"]
+                        
+                        # 获取记忆内容
+                        memory_result = self.db_manager.query(
+                            "SELECT content, timestamp FROM memories WHERE id = ?",
+                            (memory_id,)
+                        )
+                        
+                        if memory_result:
+                            content = memory_result[0][0]
+                            timestamp = memory_result[0][1]
+                            
+                            # 生成向量
+                            vector = self._vectorize_text(content)
+                            if vector is not None:
+                                vector_id = f"vec_{memory_id}"
+                                vector_blob = vector.tobytes()
+                                model_name = f"{self.vectorizer.model_type}/{self.vectorizer.model_name}" if self.vectorizer else "unknown"
+                                
+                                # 存储向量
+                                self.db_manager.execute_query(
+                                    """
+                                    INSERT INTO memory_vectors
+                                    (id, memory_id, vector, model_name, timestamp)
+                                    VALUES (?, ?, ?, ?, ?)
+                                    """,
+                                    (vector_id, memory_id, vector_blob, model_name, timestamp)
+                                )
+                                
+                                repair_report["operations"].append({
+                                    "type": "fix_missing_vector",
+                                    "memory_id": memory_id,
+                                    "status": "success"
+                                })
+                                repair_report["success_count"] += 1
+                                
+                    except Exception as e:
+                        logger.error(f"修复缺失向量失败 {memory_id}: {e}")
+                        repair_report["operations"].append({
+                            "type": "fix_missing_vector",
+                            "memory_id": memory_id,
+                            "status": "error",
+                            "error": str(e)
+                        })
+                        repair_report["error_count"] += 1
+            
+            # 删除孤立向量
+            if repair_options.get("remove_orphaned_vectors", False) and consistency_report["orphaned_vectors"]:
+                logger.info("开始删除孤立向量...")
+                for orphaned in consistency_report["orphaned_vectors"]:
+                    try:
+                        vector_id = orphaned["vector_id"]
+                        
+                        self.db_manager.execute_query(
+                            "DELETE FROM memory_vectors WHERE id = ?",
+                            (vector_id,)
+                        )
+                        
+                        repair_report["operations"].append({
+                            "type": "remove_orphaned_vector",
+                            "vector_id": vector_id,
+                            "status": "success"
+                        })
+                        repair_report["success_count"] += 1
+                        
+                    except Exception as e:
+                        logger.error(f"删除孤立向量失败 {vector_id}: {e}")
+                        repair_report["operations"].append({
+                            "type": "remove_orphaned_vector",
+                            "vector_id": vector_id,
+                            "status": "error",
+                            "error": str(e)
+                        })
+                        repair_report["error_count"] += 1
+            
+            # 重建FAISS索引
+            if repair_options.get("rebuild_faiss", False):
+                logger.info("开始重建FAISS索引...")
+                try:
+                    # 获取所有向量数据
+                    vectors_data = self.db_manager.query(
+                        """
+                        SELECT memory_id, vector FROM memory_vectors
+                        ORDER BY timestamp
+                        """
+                    )
+                    
+                    if vectors_data and self.vector_index:
+                        # 清空当前索引
+                        self.vector_index.clear()
+                        
+                        # 批量添加向量
+                        memory_ids = []
+                        vectors = []
+                        
+                        for row in vectors_data:
+                            memory_id = row[0]
+                            vector_blob = row[1]
+                            
+                            try:
+                                vector = np.frombuffer(vector_blob, dtype=np.float32)
+                                memory_ids.append(memory_id)
+                                vectors.append(vector)
+                            except Exception as e:
+                                logger.warning(f"解析向量失败 {memory_id}: {e}")
+                        
+                        if vectors:
+                            vectors_array = np.array(vectors)
+                            success = self.vector_index.add_vectors(
+                                vectors=vectors_array,
+                                ids=memory_ids
+                            )
+                            
+                            if success:
+                                self.vector_index.save_index()
+                                repair_report["operations"].append({
+                                    "type": "rebuild_faiss",
+                                    "vectors_count": len(vectors),
+                                    "status": "success"
+                                })
+                                repair_report["success_count"] += 1
+                            else:
+                                raise Exception("FAISS索引添加失败")
+                
+                except Exception as e:
+                    logger.error(f"重建FAISS索引失败: {e}")
+                    repair_report["operations"].append({
+                        "type": "rebuild_faiss",
+                        "status": "error",
+                        "error": str(e)
+                    })
+                    repair_report["error_count"] += 1
+            
+            # 确定最终状态
+            if repair_report["error_count"] == 0:
+                repair_report["status"] = "success"
+            elif repair_report["success_count"] > repair_report["error_count"]:
+                repair_report["status"] = "partial_success"
+            else:
+                repair_report["status"] = "failed"
+            
+            logger.info(f"数据一致性修复完成，状态: {repair_report['status']}")
+            return repair_report
+            
+        except Exception as e:
+            logger.error(f"数据一致性修复失败: {e}")
+            repair_report["status"] = "error"
+            repair_report["error"] = str(e)
+            return repair_report
 
 # 模块测试代码
 if __name__ == "__main__":

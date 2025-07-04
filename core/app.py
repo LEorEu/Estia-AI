@@ -49,26 +49,30 @@ class EstiaApp:
             logger.debug("暂时没有事件循环，异步组件将在需要时初始化")
     
     async def _initialize_async_components(self):
-        """异步初始化组件"""
+        """异步初始化组件 - 使用稳定的启动管理器"""
         try:
             if self.memory and not self._async_initialized:
                 if self.show_progress:
                     print("⚡ 正在初始化异步评估器...")
                 
-                await self.memory.ensure_async_initialized()
-                self._async_initialized = True
+                # 使用稳定的启动管理器初始化
+                success = self.memory.ensure_async_initialized()
+                self._async_initialized = success
                 
                 if self.show_progress:
+                    if success:
                     print("   ✅ 异步评估器就绪")
+                    else:
+                        print("   ⚠️ 异步评估器初始化失败，将在后续重试")
                     
-                logger.info("异步组件初始化完成")
+                logger.info(f"异步组件初始化完成: {success}")
         except Exception as e:
             logger.error(f"异步组件初始化失败: {e}")
     
-    async def ensure_fully_initialized(self):
-        """确保所有组件（包括异步组件）都已初始化"""
-        if not self._async_initialized:
-            await self._initialize_async_components()
+    def ensure_fully_initialized(self):
+        """确保所有组件（包括异步组件）都已初始化 - 简化为同步方法"""
+        if not self._async_initialized and self.memory:
+            self._async_initialized = self.memory.ensure_async_initialized()
     
     def _initialize_system(self):
         """系统初始化 - 启动时预加载"""
