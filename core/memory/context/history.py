@@ -495,3 +495,49 @@ class HistoryRetriever:
         except Exception as e:
             self.logger.error(f"格式化上下文失败: {e}")
             return "上下文格式化失败。"
+
+    def aggregate_session_memories(self, session_id: str, limit: int = 50) -> List[Dict[str, Any]]:
+        """
+        聚合指定会话的所有记忆
+        
+        参数:
+            session_id: 会话ID
+            limit: 返回结果数量限制
+            
+        返回:
+            List[Dict[str, Any]]: 会话记忆列表
+        """
+        try:
+            if not self.db_manager:
+                self.logger.error("数据库管理器未初始化")
+                return []
+            
+            # 获取会话记忆
+            session_memories = self._get_session_memories(session_id, limit)
+            
+            if not session_memories:
+                self.logger.debug(f"会话 {session_id} 没有找到记忆")
+                return []
+            
+            # 按时间排序
+            session_memories.sort(key=lambda x: x["timestamp"])
+            
+            # 添加聚合统计
+            aggregated_result = {
+                "session_id": session_id,
+                "memories": session_memories,
+                "count": len(session_memories),
+                "time_span": {
+                    "start": session_memories[0]["formatted_time"] if session_memories else "",
+                    "end": session_memories[-1]["formatted_time"] if session_memories else ""
+                },
+                "avg_weight": sum(m["weight"] for m in session_memories) / len(session_memories) if session_memories else 0,
+                "dialogue_pairs": self._extract_dialogue_pairs(session_memories)
+            }
+            
+            self.logger.info(f"会话聚合完成: {session_id}, {len(session_memories)}条记忆")
+            return session_memories
+            
+        except Exception as e:
+            self.logger.error(f"聚合会话记忆失败: {e}")
+            return []

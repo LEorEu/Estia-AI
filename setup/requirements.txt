@@ -26,6 +26,10 @@ requests>=2.31.0
 numpy>=1.24.0
 scipy>=1.11.0
 
+# 测试框架
+pytest>=8.0.0
+freezegun>=1.4.0
+
 # 注意事项:
 # 1. 建议使用install.bat进行完整安装
 # 2. PyTorch版本会根据CUDA自动选择

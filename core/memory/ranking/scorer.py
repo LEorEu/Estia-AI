@@ -104,6 +104,22 @@ class MemoryScorer:
         
         return result
     
+    def rank_memories(self, memories: List[Dict[str, Any]], 
+                     query: str = "", 
+                     max_results: int = 10) -> List[Dict[str, Any]]:
+        """
+        记忆排序方法 - 作为score_memories的别名
+        
+        参数:
+            memories: 记忆列表
+            query: 查询文本（用于相似度计算）
+            max_results: 最大返回结果数
+            
+        返回:
+            排序后的记忆列表
+        """
+        return self.score_memories(memories, query, max_results)
+    
     def _calculate_score(self, memory: Dict[str, Any], query: str, current_time: float) -> float:
         """计算单个记忆的综合分数"""
         try:

@@ -26,6 +26,37 @@ except ImportError:
     logger.warning("无法导入EnhancedMemoryCache，将不使用缓存功能")
     EmbeddingCache = None
 
+def cosine_similarity(vec1: np.ndarray, vec2: np.ndarray) -> float:
+    """
+    计算两个向量的余弦相似度
+    
+    参数:
+        vec1: 第一个向量
+        vec2: 第二个向量
+        
+    返回:
+        余弦相似度值 (0-1之间)
+    """
+    try:
+        # 确保向量是numpy数组
+        vec1 = np.array(vec1, dtype=np.float32)
+        vec2 = np.array(vec2, dtype=np.float32)
+        
+        # 计算余弦相似度
+        dot_product = np.dot(vec1, vec2)
+        norm1 = np.linalg.norm(vec1)
+        norm2 = np.linalg.norm(vec2)
+        
+        if norm1 == 0 or norm2 == 0:
+            return 0.0
+        
+        similarity = dot_product / (norm1 * norm2)
+        return float(similarity)
+        
+    except Exception as e:
+        logger.error(f"计算余弦相似度失败: {e}")
+        return 0.0
+
 class TextVectorizer:
     """
     文本向量化类，负责将文本转换为向量表示

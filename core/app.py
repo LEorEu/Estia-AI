@@ -61,7 +61,7 @@ class EstiaApp:
                 
                 if self.show_progress:
                     if success:
-                    print("   ✅ 异步评估器就绪")
+                        print("   ✅ 异步评估器就绪")
                     else:
                         print("   ⚠️ 异步评估器初始化失败，将在后续重试")
                     
@@ -162,6 +162,162 @@ class EstiaApp:
             self.logger.warning(f"系统预热失败: {e}")
             # 预热失败不影响系统正常运行
         
+    def process_query_stream(self, query, context=None):
+        """
+        流式处理用户查询
+        
+        参数:
+            query: 用户输入的文本
+            context: 可选的上下文信息
+            
+        返回:
+            生成器，yield文本片段
+        """
+        if not self.is_initialized or not self.memory or not self.dialogue_engine:
+            raise RuntimeError("系统未初始化完成")
+        
+        start_time = time.time()
+        
+        try:
+            # 使用记忆系统增强查询
+            self.logger.debug(f"开始流式处理查询: {query[:50]}...")
+            
+            enhanced_context = self.memory.enhance_query(query, context)
+            enhance_time = time.time() - start_time
+            
+            self.logger.debug(f"记忆增强完成，耗时: {enhance_time*1000:.2f}ms，上下文长度: {len(enhanced_context)}")
+            
+            # 使用对话引擎流式生成回复
+            response_start = time.time()
+            
+            # 根据配置选择流式输出方式
+            if settings.ENABLE_TEXT_STREAM and settings.ENABLE_AUDIO_STREAM:
+                # 文本+语音流式输出
+                yield from self._process_stream_with_audio(query, enhanced_context)
+            elif settings.ENABLE_TEXT_STREAM:
+                # 仅文本流式输出
+                yield from self._process_text_stream(query, enhanced_context)
+            elif settings.ENABLE_AUDIO_STREAM:
+                # 仅语音流式输出
+                yield from self._process_audio_stream(query, enhanced_context)
+            else:
+                # 普通输出
+                response = self.dialogue_engine.generate_response(query, enhanced_context)
+                yield response
+            
+            response_time = time.time() - response_start
+            self.logger.debug(f"流式对话生成完成，耗时: {response_time*1000:.2f}ms")
+            
+            # 异步存储对话记录（不阻塞响应）
+            try:
+                # 收集完整回复用于存储
+                full_response = ""
+                # 这里需要根据具体的流式输出方式收集完整回复
+                self.memory.store_interaction(query, full_response, context)
+                self.logger.debug("对话记录已加入存储队列")
+            except Exception as e:
+                self.logger.warning(f"存储对话记录失败: {e}")
+            
+        except Exception as e:
+            self.logger.error(f"流式处理查询失败: {e}")
+            yield f"抱歉，处理您的请求时出现错误: {str(e)}"
+    
+    def _process_text_stream(self, query, enhanced_context):
+        """处理文本流式输出"""
+        try:
+            # 使用对话引擎的流式方法
+            if self.dialogue_engine:
+                response_generator = self.dialogue_engine._get_llm_response_stream(
+                    f"请基于以下信息回答用户的问题或请求。\n\n{enhanced_context}\n\n用户请求: {query}\n\n请基于上述信息给出回复:",
+                    [],
+                    ""
+                )
+                
+                for chunk in response_generator:
+                    yield chunk
+            else:
+                yield "对话引擎未初始化"
+                
+        except Exception as e:
+            self.logger.error(f"文本流式输出失败: {e}")
+            yield f"抱歉，文本流式输出失败: {str(e)}"
+    
+    def _process_audio_stream(self, query, enhanced_context):
+        """处理语音流式输出"""
+        try:
+            from core.audio.output import speak_stream
+            
+            # 获取文本生成器
+            if self.dialogue_engine:
+                response_generator = self.dialogue_engine._get_llm_response_stream(
+                    f"请基于以下信息回答用户的问题或请求。\n\n{enhanced_context}\n\n用户请求: {query}\n\n请基于上述信息给出回复:",
+                    [],
+                    ""
+                )
+                
+                # 使用语音流式输出
+                import asyncio
+                asyncio.run(self._speak_stream_async(response_generator))
+                
+                # 返回完整回复（用于存储）
+                full_response = ""
+                for chunk in response_generator:
+                    full_response += chunk
+                yield full_response
+            else:
+                yield "对话引擎未初始化"
+            
+        except Exception as e:
+            self.logger.error(f"语音流式输出失败: {e}")
+            yield f"抱歉，语音流式输出失败: {str(e)}"
+    
+    def _process_stream_with_audio(self, query, enhanced_context):
+        """处理文本+语音流式输出"""
+        try:
+            from core.audio.output import speak_stream
+            
+            # 获取文本生成器
+            if self.dialogue_engine:
+                response_generator = self.dialogue_engine._get_llm_response_stream(
+                    f"请基于以下信息回答用户的问题或请求。\n\n{enhanced_context}\n\n用户请求: {query}\n\n请基于上述信息给出回复:",
+                    [],
+                    ""
+                )
+                
+                # 同时进行文本和语音流式输出
+                import asyncio
+                import threading
+                
+                # 在后台线程中运行语音流式输出
+                def run_audio_stream():
+                    asyncio.run(self._speak_stream_async(response_generator))
+                
+                audio_thread = threading.Thread(target=run_audio_stream)
+                audio_thread.start()
+                
+                # 在主线程中返回文本流
+                full_response = ""
+                for chunk in response_generator:
+                    full_response += chunk
+                    yield chunk
+                
+                # 等待音频线程完成
+                audio_thread.join()
+            else:
+                yield "对话引擎未初始化"
+            
+        except Exception as e:
+            self.logger.error(f"文本+语音流式输出失败: {e}")
+            yield f"抱歉，流式输出失败: {str(e)}"
+    
+    async def _speak_stream_async(self, text_generator):
+        """异步语音流式输出"""
+        try:
+            from core.audio.output import text_to_speech_stream
+            await text_to_speech_stream(text_generator)
+        except Exception as e:
+            self.logger.error(f"异步语音流式输出失败: {e}")
+
     def process_query(self, query, context=None):
         """
         处理用户查询 - 优化版本

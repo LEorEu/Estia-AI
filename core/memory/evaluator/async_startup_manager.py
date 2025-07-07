@@ -237,7 +237,7 @@ class AsyncEvaluatorStartupManager:
     
     def queue_evaluation_safely(self, evaluation_coro):
         """
-        安全地将评估任务加入队列
+        安全地将评估任务加入队列 - 改进版本
         
         参数:
             evaluation_coro: 评估协程
@@ -249,18 +249,34 @@ class AsyncEvaluatorStartupManager:
         try:
             if self.startup_mode == AsyncStartupMode.EVENT_LOOP:
                 # 使用现有事件循环
-                loop = asyncio.get_running_loop()
-                loop.create_task(evaluation_coro)
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(evaluation_coro)
+                    return True
+                except RuntimeError:
+                    logger.warning("无法获取运行中的事件循环")
+                    return False
                 
             elif self.startup_mode in [AsyncStartupMode.NEW_LOOP, AsyncStartupMode.THREAD_POOL]:
                 # 使用管理的事件循环
                 if self.event_loop and not self.event_loop.is_closed():
-                    asyncio.run_coroutine_threadsafe(evaluation_coro, self.event_loop)
+                    try:
+                        asyncio.run_coroutine_threadsafe(evaluation_coro, self.event_loop)
+                        return True
+                    except Exception as e:
+                        logger.error(f"线程安全执行失败: {e}")
+                        return False
                 else:
-                    logger.error("管理的事件循环不可用")
-                    return False
+                    logger.warning("管理的事件循环不可用，尝试使用新事件循环")
+                    # 尝试使用新的事件循环
+                    try:
+                        asyncio.run(evaluation_coro)
+                        return True
+                    except Exception as e:
+                        logger.error(f"新事件循环执行失败: {e}")
+                        return False
             
-            return True
+            return False
             
         except Exception as e:
             logger.error(f"安全队列评估失败: {e}")

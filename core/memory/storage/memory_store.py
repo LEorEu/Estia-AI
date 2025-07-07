@@ -307,9 +307,9 @@ class MemoryStore:
         if self.db_manager is None:
             logger.error("数据库管理器未初始化，无法添加记忆")
             return None
-            
-            # 生成记忆ID
-            memory_id = f"mem_{uuid.uuid4().hex[:12]}"
+        
+        # 生成记忆ID
+        memory_id = f"mem_{uuid.uuid4().hex[:12]}"
             
         # 🔥 事务性双写机制开始
         logger.debug(f"开始事务性双写操作: {memory_id}")
@@ -1161,6 +1161,91 @@ class MemoryStore:
             repair_report["status"] = "error"
             repair_report["error"] = str(e)
             return repair_report
+
+    def get_memory_by_id(self, memory_id: str) -> Optional[Dict[str, Any]]:
+        """
+        根据ID获取记忆
+        
+        参数:
+            memory_id: 记忆ID
+            
+        返回:
+            Optional[Dict[str, Any]]: 记忆数据，不存在时返回None
+        """
+        try:
+            if not self.db_manager:
+                logger.error("数据库管理器未初始化")
+                return None
+            
+            result = self.db_manager.query(
+                """
+                SELECT id as memory_id, content, type as memory_type, role, 
+                       session_id, timestamp, weight, metadata
+                FROM memories 
+                WHERE id = ?
+                """,
+                (memory_id,)
+            )
+            
+            if result:
+                memory = dict(result[0])
+                # 解析metadata
+                if memory.get('metadata'):
+                    try:
+                        memory['metadata'] = json.loads(memory['metadata'])
+                    except:
+                        memory['metadata'] = {}
+                return memory
+            return None
+            
+        except Exception as e:
+            logger.error(f"获取记忆失败: {e}")
+            return None
+    
+    def get_session_memories(self, session_id: str, limit: int = 50) -> List[Dict[str, Any]]:
+        """
+        获取指定会话的所有记忆
+        
+        参数:
+            session_id: 会话ID
+            limit: 返回结果数量限制
+            
+        返回:
+            List[Dict[str, Any]]: 会话记忆列表
+        """
+        try:
+            if not self.db_manager:
+                logger.error("数据库管理器未初始化")
+                return []
+            
+            results = self.db_manager.query(
+                """
+                SELECT id as memory_id, content, type as memory_type, role, 
+                       session_id, timestamp, weight, metadata
+                FROM memories 
+                WHERE session_id = ?
+                ORDER BY timestamp DESC
+                LIMIT ?
+                """,
+                (session_id, limit)
+            )
+            
+            memories = []
+            for row in results:
+                memory = dict(row)
+                # 解析metadata
+                if memory.get('metadata'):
+                    try:
+                        memory['metadata'] = json.loads(memory['metadata'])
+                    except:
+                        memory['metadata'] = {}
+                memories.append(memory)
+            
+            return memories
+            
+        except Exception as e:
+            logger.error(f"获取会话记忆失败: {e}")
+            return []
 
 # 模块测试代码
 if __name__ == "__main__":

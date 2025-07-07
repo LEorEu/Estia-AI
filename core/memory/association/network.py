@@ -581,3 +581,126 @@ class AssociationNetwork:
         except Exception as e:
             logger.error(f"获取关联统计失败: {e}")
             return {}
+
+    def create_association(self, source_id: str, target_id: str, strength: float = 0.5) -> bool:
+        """
+        创建两个记忆之间的关联
+        
+        参数:
+            source_id: 源记忆ID
+            target_id: 目标记忆ID
+            strength: 关联强度
+            
+        返回:
+            bool: 是否创建成功
+        """
+        try:
+            if not self.db_manager:
+                logger.error("数据库管理器未初始化")
+                return False
+            
+            # 检查关联是否已存在（只检查单向）
+            existing = self.db_manager.query(
+                """
+                SELECT id FROM memory_association 
+                WHERE source_key = ? AND target_key = ?
+                """,
+                (source_id, target_id)
+            )
+            
+            if existing:
+                logger.debug(f"关联已存在: {source_id} -> {target_id}")
+                return True
+            
+            # 创建新关联
+            association_id = f"assoc_{int(time.time() * 1000)}"
+            result = self.db_manager.execute_query(
+                """
+                INSERT INTO memory_association 
+                (id, source_key, target_key, association_type, strength, created_at, last_activated)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (association_id, source_id, target_id, "is_related_to", strength, time.time(), time.time())
+            )
+            
+            if result:
+                logger.debug(f"✅ 关联创建成功: {source_id} -> {target_id} ({strength:.2f})")
+                return True
+            else:
+                logger.error(f"❌ 关联创建失败: {source_id} -> {target_id}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"创建关联失败: {e}")
+            return False
+    
+    def get_network_statistics(self) -> Dict[str, Any]:
+        """
+        获取关联网络统计信息
+        
+        返回:
+            Dict[str, Any]: 网络统计信息
+        """
+        try:
+            if not self.db_manager:
+                return {"error": "数据库管理器未初始化"}
+            
+            # 获取基本统计
+            stats = self.db_manager.query(
+                """
+                SELECT 
+                    COUNT(*) as total_associations,
+                    COUNT(DISTINCT source_key) as unique_sources,
+                    COUNT(DISTINCT target_key) as unique_targets,
+                    AVG(strength) as avg_strength,
+                    MAX(strength) as max_strength,
+                    MIN(strength) as min_strength
+                FROM memory_association
+                """
+            )
+            
+            if stats:
+                result = dict(stats[0])
+                result['status'] = 'success'
+                return result
+            else:
+                return {"status": "no_data", "total_associations": 0}
+                
+        except Exception as e:
+            logger.error(f"获取网络统计失败: {e}")
+            return {"error": str(e)}
+    
+    def delete_association(self, source_id: str, target_id: str) -> bool:
+        """
+        删除两个记忆之间的关联
+        
+        参数:
+            source_id: 源记忆ID
+            target_id: 目标记忆ID
+            
+        返回:
+            bool: 是否删除成功
+        """
+        try:
+            if not self.db_manager:
+                logger.error("数据库管理器未初始化")
+                return False
+            
+            result = self.db_manager.execute_query(
+                """
+                DELETE FROM memory_association 
+                WHERE (source_key = ? AND target_key = ?) OR (source_key = ? AND target_key = ?)
+                """,
+                (source_id, target_id, target_id, source_id)
+            )
+            
+            if result:
+                logger.debug(f"✅ 关联删除成功: {source_id} <-> {target_id}")
+                return True
+            else:
+                logger.warning(f"⚠️ 关联删除失败或不存在: {source_id} <-> {target_id}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"删除关联失败: {e}")
+            return False

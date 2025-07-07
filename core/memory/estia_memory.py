@@ -20,12 +20,13 @@ class EstiaMemorySystem:
     按照设计文档实现完整的13步工作流程
     """
     
-    def __init__(self, enable_advanced: bool = True):
+    def __init__(self, enable_advanced: bool = True, context_preset: str = None):
         """
         初始化Estia记忆系统
         
         Args:
             enable_advanced: 是否启用高级功能（关联网络、异步评估等）
+            context_preset: 上下文长度预设，可选: "compact", "balanced", "detailed"
         """
         # 使用模块级logger，避免重复设置
         self.logger = logger
@@ -47,6 +48,10 @@ class EstiaMemorySystem:
         self.session_start_time = None
         self.session_timeout = 3600  # 1小时会话超时
         
+        # 🆕 上下文长度管理器
+        from .context.context_manager import ContextLengthManager
+        self.context_manager = ContextLengthManager(preset=context_preset)
+        
         # 系统状态
         self.enable_advanced = enable_advanced
         self.initialized = False
@@ -58,7 +63,7 @@ class EstiaMemorySystem:
             self._initialize_advanced_components()
             self._initialize_async_evaluator()
         
-        logger.info(f"Estia记忆系统初始化完成 (高级功能: {'启用' if enable_advanced else '禁用'})")
+        logger.info(f"Estia记忆系统初始化完成 (高级功能: {'启用' if enable_advanced else '禁用'}, 上下文预设: {self.context_manager.preset})")
     
     def _initialize_components(self):
         """初始化7个核心组件"""
@@ -253,24 +258,45 @@ class EstiaMemorySystem:
             similar_memory_ids = []
             if self.faiss_retriever:
                 search_results = self.faiss_retriever.search(query_vector, k=15)
+                # 🔥 降低相似度阈值，提高检索召回率
                 similar_memory_ids = [memory_id for memory_id, similarity in search_results 
-                                    if memory_id and similarity > 0.5]
+                                    if memory_id and similarity > 0.3]  # 从0.5降低到0.3
+                
+                # 如果检索结果太少，进一步降低阈值
+                if len(similar_memory_ids) < 3:
+                    similar_memory_ids = [memory_id for memory_id, similarity in search_results 
+                                        if memory_id and similarity > 0.1]  # 进一步降低到0.1
+                
+                self.logger.debug(f"FAISS检索到 {len(similar_memory_ids)} 条相似记忆")
+            
+            # 如果FAISS检索失败，尝试使用MemoryStore的搜索功能
+            if not similar_memory_ids and self.memory_store:
+                self.logger.debug("FAISS检索失败，使用MemoryStore搜索")
+                try:
+                    similar_memories = self.memory_store.search_similar(user_input, limit=10)
+                    similar_memory_ids = [mem.get('memory_id') for mem in similar_memories 
+                                        if mem.get('memory_id')]
+                    self.logger.debug(f"MemoryStore搜索到 {len(similar_memory_ids)} 条记忆")
+                except Exception as e:
+                    self.logger.warning(f"MemoryStore搜索失败: {e}")
             
             # Step 5: 关联网络拓展 (可选)
             expanded_memory_ids = similar_memory_ids.copy()
-            if self.enable_advanced and self.association_network:
+            if self.enable_advanced and self.association_network and similar_memory_ids:
                 self.logger.debug("🕸️ Step 5: 关联网络拓展")
                 try:
-                    # get_related_memories返回字典列表，需要提取memory_id
-                    if similar_memory_ids:
+                    # 对每个相似记忆进行关联拓展
+                    for memory_id in similar_memory_ids[:3]:  # 只对前3个记忆进行拓展
                         associated_memories = self.association_network.get_related_memories(
-                            similar_memory_ids[0], depth=2, min_strength=0.3
+                            memory_id, depth=1, min_strength=0.3
                         )
                         associated_ids = [mem.get('memory_id') for mem in associated_memories 
                                         if mem.get('memory_id')]
                         expanded_memory_ids.extend(associated_ids)
-                        # 去重
-                        expanded_memory_ids = list(dict.fromkeys(expanded_memory_ids))
+                    
+                    # 去重
+                    expanded_memory_ids = list(dict.fromkeys(expanded_memory_ids))
+                    self.logger.debug(f"关联网络拓展后共有 {len(expanded_memory_ids)} 条记忆")
                 except Exception as e:
                     self.logger.warning(f"关联网络拓展失败: {e}")
             
@@ -301,7 +327,14 @@ class EstiaMemorySystem:
                                 f"{len(historical_context['session_dialogues'])} 个会话")
             else:
                 # 降级：使用MemoryStore直接获取记忆
-                context_memories = self.memory_store.get_memories_by_ids(expanded_memory_ids) if self.memory_store else []
+                if self.memory_store and expanded_memory_ids:
+                    context_memories = self.memory_store.get_memories_by_ids(expanded_memory_ids)
+                    self.logger.debug(f"降级模式：直接获取 {len(context_memories)} 条记忆")
+                else:
+                    # 如果没有任何记忆，获取最近的记忆
+                    if self.memory_store:
+                        context_memories = self.memory_store.get_recent_memories(limit=5)
+                        self.logger.debug(f"无相似记忆，获取最近 {len(context_memories)} 条记忆")
             
             # 保存上下文记忆到context（供后续异步评估使用）
             if context:
@@ -408,7 +441,7 @@ class EstiaMemorySystem:
     
     def _safe_trigger_async_evaluation(self, user_input: str, ai_response: str, 
                                      session_id: str, context_memories: List):
-        """安全地触发异步评估 - 使用稳定的启动管理器"""
+        """安全地触发异步评估 - 改进版本"""
         try:
             # 确保异步评估器已初始化
             if not self.ensure_async_initialized():
@@ -429,10 +462,11 @@ class EstiaMemorySystem:
             if success:
                 logger.debug("✅ 异步评估任务已安全加入队列")
             else:
-                logger.warning("❌ 异步评估任务加入失败")
+                logger.warning("❌ 异步评估任务加入失败，但不会影响主流程")
                 
         except Exception as e:
             logger.error(f"异步评估触发失败: {e}")
+            # 不抛出异常，避免影响主流程
     
     async def _queue_for_async_evaluation(self, user_input: str, ai_response: str, 
                                         session_id: str, context_memories: List):
@@ -457,72 +491,37 @@ class EstiaMemorySystem:
 
     def _build_enhanced_context(self, user_input: str, memories: List[Dict], 
                               historical_context: Dict) -> str:
-        """Step 8: 组装最终上下文 - 🆕 包含会话对话"""
-        context_parts = []
+        """Step 9: 使用上下文长度管理器构建增强上下文"""
+        # 获取当前会话的对话历史
+        current_session_dialogues = []
+        if self.current_session_id:
+            try:
+                # 从当前会话获取最近的对话
+                session_memories = self.memory_store.get_session_memories(
+                    self.current_session_id, max_count=10
+                )
+                
+                # 构建对话对
+                user_memories = [m for m in session_memories if m.get('role') == 'user']
+                assistant_memories = [m for m in session_memories if m.get('role') == 'assistant']
+                
+                # 配对对话
+                for i in range(min(len(user_memories), len(assistant_memories))):
+                    current_session_dialogues.append({
+                        "user": user_memories[i].get('content', ''),
+                        "assistant": assistant_memories[i].get('content', '')
+                    })
+            except Exception as e:
+                self.logger.debug(f"获取当前会话对话失败: {e}")
         
-        # 角色设定
-        context_parts.append("[系统角色设定]")
-        context_parts.append("你是Estia，一个智能、友好、具有长期记忆的AI助手。")
-        context_parts.append("")
-        
-        # 核心记忆（高权重）
-        core_memories = [m for m in memories if m.get('weight', 0) >= 8.0]
-        if core_memories:
-            context_parts.append("[核心记忆]")
-            for memory in core_memories[:3]:
-                content = memory.get('content', '')[:100]
-                weight = memory.get('weight', 0)
-                context_parts.append(f"• [权重: {weight:.1f}] {content}")
-            context_parts.append("")
-        
-        # 🆕 会话历史对话（按设计文档Step 6实现）
-        session_dialogues = historical_context.get('session_dialogues', {})
-        if session_dialogues:
-            context_parts.append("[历史对话]")
-            for session_id, session_data in session_dialogues.items():
-                dialogue_pairs = session_data.get('dialogue_pairs', [])
-                if dialogue_pairs:
-                    context_parts.append(f"会话 {session_id}:")
-                    for i, pair in enumerate(dialogue_pairs[-3:]):  # 最近3轮对话
-                        user_content = pair['user']['content'][:80]
-                        ai_content = pair['assistant']['content'][:80]
-                        context_parts.append(f"  {i+1}. 你: {user_content}")
-                        context_parts.append(f"     我: {ai_content}")
-            context_parts.append("")
-        
-        # 相关记忆
-        relevant_memories = [m for m in memories if m.get('weight', 0) >= 5.0][:8]
-        if relevant_memories:
-            context_parts.append("[相关记忆]")
-            for memory in relevant_memories:
-                content = memory.get('content', '')[:120]
-                timestamp = memory.get('timestamp', 0)
-                try:
-                    time_str = datetime.fromtimestamp(timestamp).strftime('%m-%d %H:%M')
-                except:
-                    time_str = "未知时间"
-                context_parts.append(f"• [{time_str}] {content}")
-            context_parts.append("")
-        
-        # 总结内容
-        summaries_data = historical_context.get('summaries', {})
-        all_summaries = []
-        all_summaries.extend(summaries_data.get('direct_summaries', []))
-        all_summaries.extend(summaries_data.get('memory_summaries', []))
-        
-        if all_summaries:
-            context_parts.append("[重要总结]")
-            for summary in all_summaries[:5]:
-                content = summary.get('content', '')[:100]
-                context_parts.append(f"• {content}")
-            context_parts.append("")
-        
-        # 当前用户输入
-        context_parts.append(f"[当前输入] {user_input}")
-        context_parts.append("")
-        context_parts.append("请基于以上记忆和历史对话，给出自然、连贯的回复：")
-        
-        return "\n".join(context_parts)
+        # 使用上下文长度管理器构建上下文
+        return self.context_manager.build_enhanced_context(
+            user_input=user_input,
+            memories=memories,
+            historical_context=historical_context,
+            current_session_id=self.current_session_id,
+            current_session_dialogues=current_session_dialogues
+        )
     
     def _build_fallback_context(self, user_input: str) -> str:
         """构建降级上下文"""
@@ -605,6 +604,6 @@ class EstiaMemorySystem:
             logger.error(f"系统关闭失败: {e}")
 
 
-def create_estia_memory(enable_advanced: bool = True) -> EstiaMemorySystem:
+def create_estia_memory(enable_advanced: bool = True, context_preset: str = None) -> EstiaMemorySystem:
     """创建Estia记忆系统实例"""
-    return EstiaMemorySystem(enable_advanced=enable_advanced) 
+    return EstiaMemorySystem(enable_advanced=enable_advanced, context_preset=context_preset) 

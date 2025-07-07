@@ -156,13 +156,14 @@ class AsyncMemoryEvaluator:
             # 生成当前日期的group_id
             current_date = datetime.now().strftime("%Y_%m_%d")
             
+            # 收集增强的上下文信息
+            enhanced_context = await self._collect_enhanced_context(dialogue_data)
+            
             # 使用提示词管理器生成评估提示词
             evaluation_prompt = MemoryEvaluationPrompts.get_dialogue_evaluation_prompt(
                 user_input=dialogue_data['user_input'],
                 ai_response=dialogue_data['ai_response'],
-                context_info={
-                    'context_memories': dialogue_data.get('context_memories', [])
-                }
+                context_info=enhanced_context
             )
 
             start_time = time.time()
@@ -188,6 +189,94 @@ class AsyncMemoryEvaluator:
         except Exception as e:
             self.logger.error(f"对话评估失败: {e}")
             return None
+    
+    async def _collect_enhanced_context(self, dialogue_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        收集增强的上下文信息
+        
+        参数:
+            dialogue_data: 对话数据
+            
+        返回:
+            增强的上下文信息字典
+        """
+        try:
+            enhanced_context = {
+                'context_memories': dialogue_data.get('context_memories', [])
+            }
+            
+            # 分析行为模式
+            behavior_patterns = await self._analyze_behavior_patterns(dialogue_data)
+            if behavior_patterns:
+                enhanced_context['behavior_patterns'] = behavior_patterns
+            
+            # 分析情感趋势
+            emotional_trends = await self._analyze_emotional_trends(dialogue_data)
+            if emotional_trends:
+                enhanced_context['emotional_trends'] = emotional_trends
+            
+            return enhanced_context
+            
+        except Exception as e:
+            self.logger.error(f"收集增强上下文失败: {e}")
+            return {'context_memories': dialogue_data.get('context_memories', [])}
+    
+    async def _analyze_behavior_patterns(self, dialogue_data: Dict[str, Any]) -> List[str]:
+        """分析用户行为模式"""
+        try:
+            patterns = []
+            context_memories = dialogue_data.get('context_memories', [])
+            
+            # 分析工作模式
+            work_related = [m for m in context_memories if 'work' in m.get('content', '').lower()]
+            if work_related:
+                patterns.append("工作相关讨论频繁")
+            
+            # 分析时间模式
+            recent_memories = [m for m in context_memories if m.get('timestamp', 0) > time.time() - 7*24*3600]
+            if len(recent_memories) > 5:
+                patterns.append("近期对话活跃")
+            
+            return patterns
+            
+        except Exception as e:
+            self.logger.error(f"分析行为模式失败: {e}")
+            return []
+    
+    async def _analyze_emotional_trends(self, dialogue_data: Dict[str, Any]) -> List[str]:
+        """分析情感趋势"""
+        try:
+            trends = []
+            context_memories = dialogue_data.get('context_memories', [])
+            
+            # 分析情感关键词
+            positive_words = ['开心', '满意', '成功', '进步', '好']
+            negative_words = ['压力', '焦虑', '困难', '问题', '累']
+            
+            positive_count = 0
+            negative_count = 0
+            
+            for memory in context_memories:
+                content = memory.get('content', '').lower()
+                for word in positive_words:
+                    if word in content:
+                        positive_count += 1
+                for word in negative_words:
+                    if word in content:
+                        negative_count += 1
+            
+            if positive_count > negative_count:
+                trends.append("整体情感倾向积极")
+            elif negative_count > positive_count:
+                trends.append("整体情感倾向消极")
+            else:
+                trends.append("情感状态相对平衡")
+            
+            return trends
+            
+        except Exception as e:
+            self.logger.error(f"分析情感趋势失败: {e}")
+            return []
     
     def _parse_evaluation_response(self, response: str) -> Optional[Dict[str, Any]]:
         """

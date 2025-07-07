@@ -530,6 +530,92 @@ class DatabaseManager:
             logger.error(f"获取表信息失败: {e}")
             return None
 
+    def table_exists(self, table_name):
+        """检查表是否存在"""
+        try:
+            if not self._ensure_connection():
+                return False
+            
+            self.cursor.execute("""
+                SELECT name FROM sqlite_master 
+                WHERE type='table' AND name=?
+            """, (table_name,))
+            
+            result = self.cursor.fetchone()
+            return result is not None
+            
+        except Exception as e:
+            logger.error(f"检查表 {table_name} 是否存在时出错: {e}")
+            return False
+    
+    def insert_memory(self, memory_data):
+        """插入记忆数据"""
+        try:
+            if not self._ensure_connection():
+                return False
+            
+            self.cursor.execute("""
+                INSERT INTO memories (id, content, type, role, session_id, timestamp, weight, last_accessed, metadata)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                memory_data['memory_id'],
+                memory_data['content'],
+                memory_data['memory_type'],
+                memory_data['role'],
+                memory_data['session_id'],
+                memory_data['timestamp'],
+                memory_data['weight'],
+                memory_data['timestamp'],  # last_accessed使用相同的时间戳
+                json.dumps(memory_data.get('metadata', {}))
+            ))
+            
+            self.conn.commit()
+            return True
+            
+        except Exception as e:
+            logger.error(f"插入记忆失败: {e}")
+            if self.conn:
+                self.conn.rollback()
+            return False
+    
+    def get_memory_by_id(self, memory_id):
+        """根据ID获取记忆"""
+        try:
+            if not self._ensure_connection():
+                return None
+            
+            self.cursor.execute("""
+                SELECT * FROM memories WHERE id = ?
+            """, (memory_id,))
+            
+            result = self.cursor.fetchone()
+            if result:
+                return dict(result)
+            return None
+            
+        except Exception as e:
+            logger.error(f"获取记忆失败: {e}")
+            return None
+    
+    def delete_memory(self, memory_id):
+        """删除记忆"""
+        try:
+            if not self._ensure_connection():
+                return False
+            
+            self.cursor.execute("""
+                DELETE FROM memories WHERE id = ?
+            """, (memory_id,))
+            
+            self.conn.commit()
+            return True
+            
+        except Exception as e:
+            logger.error(f"删除记忆失败: {e}")
+            if self.conn:
+                self.conn.rollback()
+            return False
+
 # 模块测试代码
 if __name__ == "__main__":
     # 使用临时数据库进行测试
