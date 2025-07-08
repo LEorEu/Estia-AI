@@ -12,7 +12,9 @@ from config.settings import (
     MEMORY_CONTEXT_LIMITS, 
     MEMORY_CONTEXT_ADAPTIVE,
     MEMORY_CONTEXT_PRESETS,
-    MEMORY_CONTEXT_PRESET
+    MEMORY_CONTEXT_PRESET,
+    MEMORY_CONTEXT_DEFAULT_LIMITS as DEFAULT_LIMITS,
+    MEMORY_CONTEXT_DEFAULT_ADAPTIVE as DEFAULT_ADAPTIVE
 )
 
 logger = logging.getLogger(__name__)
@@ -78,8 +80,8 @@ class ContextLengthManager:
     def format_current_session(self, dialogues: List[Dict[str, Any]]) -> str:
         """格式化当前会话对话"""
         limit = self.get_section_limit("current_session")
-        max_dialogues = limit.get("max_dialogues", 5)  # 改为与balanced预设一致
-        max_chars = limit.get("max_chars_per_dialogue", 300)  # 改为与balanced预设一致
+        max_dialogues = limit.get("max_dialogues", DEFAULT_LIMITS["current_session"]["max_dialogues"])
+        max_chars = limit.get("max_chars_per_dialogue", DEFAULT_LIMITS["current_session"]["max_chars_per_dialogue"])
         
         formatted_parts = []
         for dialogue in dialogues[-max_dialogues:]:
@@ -94,9 +96,9 @@ class ContextLengthManager:
     def format_core_memories(self, memories: List[Dict[str, Any]]) -> str:
         """格式化核心记忆"""
         limit = self.get_section_limit("core_memories")
-        max_count = limit.get("max_count", 5)  # 改为与balanced预设一致
-        max_chars = limit.get("max_chars_per_memory", 250)  # 改为与balanced预设一致
-        min_weight = limit.get("min_weight", 8.0)
+        max_count = limit.get("max_count", DEFAULT_LIMITS["core_memories"]["max_count"])
+        max_chars = limit.get("max_chars_per_memory", DEFAULT_LIMITS["core_memories"]["max_chars_per_memory"])
+        min_weight = limit.get("min_weight", DEFAULT_LIMITS["core_memories"]["min_weight"])
         
         # 筛选高权重记忆
         core_memories = [m for m in memories if m.get('weight', 0) >= min_weight]
@@ -113,9 +115,9 @@ class ContextLengthManager:
     def format_historical_dialogues(self, session_dialogues: Dict[str, Any]) -> str:
         """格式化历史对话"""
         limit = self.get_section_limit("historical_dialogues")
-        max_sessions = limit.get("max_sessions", 3)  # 改为与balanced预设一致
-        max_dialogues_per_session = limit.get("max_dialogues_per_session", 3)  # 改为与balanced预设一致
-        max_chars = limit.get("max_chars_per_dialogue", 250)  # 改为与balanced预设一致
+        max_sessions = limit.get("max_sessions", DEFAULT_LIMITS["historical_dialogues"]["max_sessions"])
+        max_dialogues_per_session = limit.get("max_dialogues_per_session", DEFAULT_LIMITS["historical_dialogues"]["max_dialogues_per_session"])
+        max_chars = limit.get("max_chars_per_dialogue", DEFAULT_LIMITS["historical_dialogues"]["max_chars_per_dialogue"])
         
         formatted_parts = []
         session_count = 0
@@ -141,9 +143,9 @@ class ContextLengthManager:
     def format_relevant_memories(self, memories: List[Dict[str, Any]]) -> str:
         """格式化相关记忆"""
         limit = self.get_section_limit("relevant_memories")
-        max_count = limit.get("max_count", 8)  # 改为与balanced预设一致
-        max_chars = limit.get("max_chars_per_memory", 200)  # 改为与balanced预设一致
-        min_weight = limit.get("min_weight", 5.0)
+        max_count = limit.get("max_count", DEFAULT_LIMITS["relevant_memories"]["max_count"])
+        max_chars = limit.get("max_chars_per_memory", DEFAULT_LIMITS["relevant_memories"]["max_chars_per_memory"])
+        min_weight = limit.get("min_weight", DEFAULT_LIMITS["relevant_memories"]["min_weight"])
         
         # 筛选中等权重记忆
         relevant_memories = [m for m in memories if m.get('weight', 0) >= min_weight]
@@ -165,8 +167,8 @@ class ContextLengthManager:
     def format_summaries(self, summaries: List[Dict[str, Any]]) -> str:
         """格式化总结内容"""
         limit = self.get_section_limit("summaries")
-        max_count = limit.get("max_count", 5)  # 改为与balanced预设一致
-        max_chars = limit.get("max_chars_per_summary", 150)  # 改为与balanced预设一致
+        max_count = limit.get("max_count", DEFAULT_LIMITS["summaries"]["max_count"])
+        max_chars = limit.get("max_chars_per_summary", DEFAULT_LIMITS["summaries"]["max_chars_per_summary"])
         
         formatted_parts = []
         for summary in summaries[:max_count]:
@@ -259,9 +261,9 @@ class ContextLengthManager:
     
     def _adaptive_length_adjustment(self, context_parts: List[str], current_length: int) -> str:
         """自适应长度调整"""
-        max_length = self.adaptive_config.get("max_length", 4000)
-        target_length = self.adaptive_config.get("target_length", 3000)
-        compression_ratio = self.adaptive_config.get("compression_ratio", 0.8)
+        max_length = self.adaptive_config.get("max_length", DEFAULT_ADAPTIVE["max_length"])
+        target_length = self.adaptive_config.get("target_length", DEFAULT_ADAPTIVE["target_length"])
+        compression_ratio = self.adaptive_config.get("compression_ratio", DEFAULT_ADAPTIVE["compression_ratio"])
         
         full_context = "\n".join(context_parts)
         
@@ -321,6 +323,6 @@ class ContextLengthManager:
             "preset": self.preset,
             "limits": self.limits,
             "adaptive_enabled": self.adaptive_config.get("enabled", True),
-            "max_length": self.adaptive_config.get("max_length", 4000),
-            "target_length": self.adaptive_config.get("target_length", 3000)
-        } 
+            "max_length": self.adaptive_config.get("max_length", DEFAULT_ADAPTIVE["max_length"]),
+            "target_length": self.adaptive_config.get("target_length", DEFAULT_ADAPTIVE["target_length"])
+        }

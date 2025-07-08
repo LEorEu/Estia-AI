@@ -56,7 +56,7 @@ def run_terminal_demo():
     print("="*60)
     
     try:
-        from demo_monitoring import main as demo_main
+        from examples.demo_monitoring import main as demo_main
         demo_main()
         return True
     except ImportError as e:
@@ -77,7 +77,7 @@ def run_web_dashboard():
         return False
     
     try:
-        from web_dashboard import run_dashboard
+        from web.web_dashboard import run_dashboard
         run_dashboard(host='127.0.0.1', port=5000, debug=False)
         return True
     except ImportError as e:

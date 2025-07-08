@@ -195,4 +195,42 @@ STREAM_AUDIO_TRIGGERS = [           # 触发音频生成的标点符号
 
 # 流式输出模式
 STREAM_MODE = "both"                # 可选: "text_only", "audio_only", "both"
-STREAM_PRIORITY = "text_first"      # 可选: "text_first", "audio_first", "parallel" 
+STREAM_PRIORITY = "text_first"      # 可选: "text_first", "audio_first", "parallel"
+
+# --- 上下文管理器默认配置 ---
+# 当配置文件中没有对应值时使用的默认值
+MEMORY_CONTEXT_DEFAULT_LIMITS = {
+    "current_session": {
+        "max_dialogues": 3,
+        "max_chars_per_dialogue": 200
+    },
+    "core_memories": {
+        "max_count": 3,
+        "max_chars_per_memory": 150,
+        "min_weight": 7.0
+    },
+    "historical_dialogues": {
+        "max_sessions": 2,
+        "max_dialogues_per_session": 2,
+        "max_chars_per_dialogue": 180
+    },
+    "relevant_memories": {
+        "max_count": 5,
+        "max_chars_per_memory": 120,
+        "min_weight": 4.0
+    },
+    "summaries": {
+        "max_count": 3,
+        "max_chars_per_summary": 100
+    },
+    "role_setting": {
+        "max_chars": 200
+    }
+}
+
+# 自适应调整默认配置
+MEMORY_CONTEXT_DEFAULT_ADAPTIVE = {
+    "max_length": 3000,
+    "target_length": 2500,
+    "compression_ratio": 0.8
+}
