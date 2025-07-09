@@ -71,17 +71,20 @@ def safe_db_execute(db_manager: "DatabaseManager", query: str, params=None,
 
 # 主要组件导入
 try:
-    from .estia_memory import EstiaMemorySystem, create_estia_memory
-    from .storage.memory_store import MemoryStore
-    from .init.db_manager import DatabaseManager
+    from .estia_memory_v5 import EstiaMemorySystem, create_estia_memory
+    from .managers.sync_flow.storage.memory_store import MemoryStore
+    from .managers.sync_flow.init.db_manager import DatabaseManager
     
     # 子模块快捷导入
-    from .association import AssociationNetwork
-    from .context import ContextBuilder, HistoryRetriever  
-    from .embedding import TextVectorizer, EmbeddingCache
-    from .evaluator import AsyncMemoryEvaluator
-    from .ranking import MemoryScorer
-    from .retrieval import FAISSSearchEngine, SmartRetriever
+    from .managers.async_flow.association.network import AssociationNetwork
+    from .managers.sync_flow.context.builder import ContextBuilder
+    from .managers.sync_flow.context.history import HistoryRetriever
+    from .shared.embedding.vectorizer import TextVectorizer
+    from .shared.embedding.cache import EmbeddingCache
+    from .managers.async_flow.evaluator.async_evaluator import AsyncMemoryEvaluator
+    from .managers.sync_flow.ranking.scorer import MemoryScorer
+    from .managers.sync_flow.retrieval.faiss_search import FAISSSearchEngine
+    from .managers.sync_flow.retrieval.smart_retriever import SmartRetriever
     
     # 向后兼容别名
     SimpleMemoryPipeline = EstiaMemorySystem
@@ -107,7 +110,7 @@ try:
     
     logger.info("✅ Estia记忆系统模块加载成功")
     
-except ImportError as e:
+except Exception as e:
     logger.warning(f"部分记忆组件导入失败: {e}")
     # 基础导入
     EstiaMemorySystem = None

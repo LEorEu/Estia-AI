@@ -27,16 +27,26 @@ class MemoryEvaluationPrompts:
         """
         
         # 基础提示词模板
-        base_prompt = f"""请对以下对话进行分析，返回JSON格式：
+        base_prompt = f"""请对以下对话进行深度分析，像人类一样理解用户的行为模式、情感变化和成长轨迹。
 
 对话内容：
 用户：{user_input}
 助手：{ai_response}
 
+请从以下维度进行"人类化"分析：
+
+1. **行为模式分析**：用户的行为是否与历史模式一致？有什么变化？
+2. **情感状态评估**：用户当前的情感状态如何？与历史相比有什么变化？
+3. **成长轨迹识别**：这次对话反映了用户的什么成长或变化？
+4. **关联性分析**：与历史记忆的关联程度如何？
+
 请分析并返回：
-1. summary: 对话摘要（根据内容类型灵活调整长度和详细程度）
-2. weight: 重要性评分（1-10分，10分最重要）
+1. summary: 深度对话摘要（结合历史上下文，分析行为变化和情感状态）
+2. weight: 重要性评分（1-10分，考虑历史关联性和行为变化程度）
 3. super_group: 大分类（工作/生活/学习/娱乐/健康/社交/其他）
+4. behavior_change: 行为变化描述（如果有明显变化）
+5. emotional_state: 情感状态描述
+6. growth_indicator: 成长指标（如果有）
 
 {MemoryEvaluationPrompts._get_summary_rules()}
 
@@ -44,9 +54,12 @@ class MemoryEvaluationPrompts:
 
 请严格按照以下JSON格式返回：
 {{
-"summary": "对话摘要（长度和详细程度根据重要性调整）",
+"summary": "深度对话摘要（结合历史上下文分析）",
 "weight": 数字,
-"super_group": "大分类"
+"super_group": "大分类",
+"behavior_change": "行为变化描述（可选）",
+"emotional_state": "情感状态描述",
+"growth_indicator": "成长指标（可选）"
 }}"""
 
         # 如果有上下文信息，添加到提示词中
@@ -93,17 +106,32 @@ class MemoryEvaluationPrompts:
         
         # 添加会话上下文
         if context_info.get('session_history'):
-            context_parts.append("会话历史：")
+            context_parts.append("📝 当前会话历史：")
             for msg in context_info['session_history'][-3:]:  # 最近3条
                 context_parts.append(f"- {msg.get('role', 'unknown')}: {msg.get('content', '')[:50]}...")
         
-        # 添加相关记忆
-        if context_info.get('related_memories'):
-            context_parts.append("\n相关记忆：")
-            for memory in context_info['related_memories'][:2]:  # 最相关的2条
-                context_parts.append(f"- {memory.get('summary', '')[:50]}...")
+        # 添加相关记忆（增强版）
+        if context_info.get('context_memories'):
+            context_parts.append("\n🧠 相关历史记忆：")
+            for memory in context_info['context_memories'][:3]:  # 最相关的3条
+                weight = memory.get('weight', 0)
+                timestamp = memory.get('timestamp', 0)
+                content = memory.get('content', '')[:80]
+                context_parts.append(f"- [{weight}分] {content}...")
+        
+        # 添加行为模式分析
+        if context_info.get('behavior_patterns'):
+            context_parts.append("\n📊 用户行为模式：")
+            for pattern in context_info['behavior_patterns']:
+                context_parts.append(f"- {pattern}")
+        
+        # 添加情感趋势
+        if context_info.get('emotional_trends'):
+            context_parts.append("\n💭 情感变化趋势：")
+            for trend in context_info['emotional_trends']:
+                context_parts.append(f"- {trend}")
         
         if context_parts:
-            return "上下文信息：\n" + "\n".join(context_parts)
+            return "🎯 增强上下文信息：\n" + "\n".join(context_parts)
         
         return "" 
