@@ -33,7 +33,7 @@ class EstiaMemorySystem:
     
     def __init__(self, enable_advanced: bool = True, context_preset: str = None):
         """
-        初始化Estia记忆系统
+        初始化Estia记忆系统 - 重构版本使用ComponentManager
         
         Args:
             enable_advanced: 是否启用高级功能（关联网络、异步评估等）
@@ -42,7 +42,11 @@ class EstiaMemorySystem:
         # 使用模块级logger，避免重复设置
         self.logger = logger
         
-        # 核心组件
+        # 🔥 使用ComponentManager统一管理组件
+        from .internal.component_manager import ComponentManager
+        self.component_manager = ComponentManager()
+        
+        # 核心组件（通过ComponentManager管理）
         self.db_manager = None
         self.vectorizer = None
         self.faiss_retriever = None
@@ -77,175 +81,268 @@ class EstiaMemorySystem:
         self.initialized = False
         self.async_initialized = False
         
-        # 初始化组件
-        self._initialize_components()
-        if enable_advanced:
-            self._initialize_advanced_components()
-            self._initialize_async_evaluator()
-        
-        # 🔥 初始化功能模块
-        self._initialize_functional_modules()
+        # 🔥 使用ComponentManager初始化所有组件
+        self._register_all_components()
+        self._initialize_all_components()
         
         logger.info(f"Estia记忆系统v3.0初始化完成 (高级功能: {'启用' if enable_advanced else '禁用'}, 上下文预设: {self.context_manager.preset})")
     
-    def _initialize_components(self):
-        """初始化7个核心组件"""
+    def _register_all_components(self):
+        """注册所有组件到ComponentManager"""
+        # 核心组件注册
+        self.component_manager.register_component(
+            'db_manager',
+            self._create_db_manager,
+            dependencies=[],
+            config={}
+        )
+        
+        self.component_manager.register_component(
+            'memory_store',
+            self._create_memory_store,
+            dependencies=['db_manager'],
+            config={}
+        )
+        
+        if self.enable_advanced:
+            # 高级组件注册
+            self.component_manager.register_component(
+                'vectorizer',
+                self._create_vectorizer,
+                dependencies=[],
+                config={}
+            )
+            
+            self.component_manager.register_component(
+                'faiss_retriever',
+                self._create_faiss_retriever,
+                dependencies=[],
+                config={'dimension': 1024}
+            )
+            
+            self.component_manager.register_component(
+                'association_network',
+                self._create_association_network,
+                dependencies=['db_manager'],
+                config={}
+            )
+            
+            self.component_manager.register_component(
+                'history_retriever',
+                self._create_history_retriever,
+                dependencies=['db_manager'],
+                config={}
+            )
+            
+            self.component_manager.register_component(
+                'smart_retriever',
+                self._create_smart_retriever,
+                dependencies=['db_manager'],
+                config={}
+            )
+            
+            self.component_manager.register_component(
+                'scorer',
+                self._create_scorer,
+                dependencies=[],
+                config={}
+            )
+            
+            self.component_manager.register_component(
+                'async_evaluator',
+                self._create_async_evaluator,
+                dependencies=['db_manager'],
+                config={}
+            )
+        
+        # 功能模块注册
+        self.component_manager.register_component(
+            'memory_search_manager',
+            self._create_memory_search_manager,
+            dependencies=['db_manager'],
+            config={}
+        )
+        
+        self.component_manager.register_component(
+            'weight_manager',
+            self._create_weight_manager,
+            dependencies=['db_manager'],
+            config={}
+        )
+        
+        self.component_manager.register_component(
+            'lifecycle_manager',
+            self._create_lifecycle_manager,
+            dependencies=['db_manager', 'weight_manager'],
+            config={}
+        )
+        
+        self.component_manager.register_component(
+            'system_stats_manager',
+            self._create_system_stats_manager,
+            dependencies=['db_manager'],
+            config={}
+        )
+        
+        self.component_manager.register_component(
+            'user_profiler',
+            self._create_user_profiler,
+            dependencies=['db_manager'],
+            config={}
+        )
+        
+        self.component_manager.register_component(
+            'summary_generator',
+            self._create_summary_generator,
+            dependencies=['db_manager'],
+            config={}
+        )
+        
+        self.component_manager.register_component(
+            'emotion_analyzer',
+            self._create_emotion_analyzer,
+            dependencies=[],
+            config={}
+        )
+    
+    def _initialize_all_components(self):
+        """使用ComponentManager初始化所有组件"""
         try:
-            # Step 1: 初始化数据库管理器
-            from .init.db_manager import DatabaseManager
-            self.db_manager = DatabaseManager()
-            if self.db_manager.connect():
-                self.db_manager.initialize_database()
-                logger.info("✅ 数据库管理器初始化成功")
+            # 初始化所有注册的组件
+            self.component_manager.initialize_all()
             
-            # Step 2: 初始化记忆存储 - 🔥 复用db_manager避免重复初始化
-            from .storage.memory_store import MemoryStore
-            self.memory_store = MemoryStore(db_manager=self.db_manager)
-            logger.info("✅ 记忆存储初始化成功 (复用数据库连接)")
+            # 获取初始化的组件并设置到实例属性
+            self.db_manager = self.component_manager.get_component('db_manager')
+            self.memory_store = self.component_manager.get_component('memory_store')
             
-            # Step 3: 初始化其他高级组件
             if self.enable_advanced:
-                self._initialize_advanced_components()
+                self.vectorizer = self.component_manager.get_component('vectorizer')
+                self.faiss_retriever = self.component_manager.get_component('faiss_retriever')
+                self.association_network = self.component_manager.get_component('association_network')
+                self.history_retriever = self.component_manager.get_component('history_retriever')
+                self.smart_retriever = self.component_manager.get_component('smart_retriever')
+                self.scorer = self.component_manager.get_component('scorer')
+                self.async_evaluator = self.component_manager.get_component('async_evaluator')
+                self.async_initialized = True
             
-            # 🔥 初始化异步评估器
-            self._initialize_async_evaluator()
+            # 功能模块
+            self.memory_search_manager = self.component_manager.get_component('memory_search_manager')
+            self.weight_manager = self.component_manager.get_component('weight_manager')
+            self.lifecycle_manager = self.component_manager.get_component('lifecycle_manager')
+            self.system_stats_manager = self.component_manager.get_component('system_stats_manager')
+            self.user_profiler = self.component_manager.get_component('user_profiler')
+            self.summary_generator = self.component_manager.get_component('summary_generator')
+            self.emotion_analyzer = self.component_manager.get_component('emotion_analyzer')
             
             self.initialized = True
+            logger.info("✅ 所有组件通过ComponentManager初始化成功")
             
         except Exception as e:
-            logger.error(f"组件初始化失败: {e}")
+            logger.error(f"ComponentManager初始化失败: {e}")
             self.initialized = False
+            raise
     
-    def _initialize_advanced_components(self):
-        """初始化高级组件"""
-        try:
-            # 向量化器
-            from .embedding.vectorizer import TextVectorizer
-            self.vectorizer = TextVectorizer()
-            logger.info("✅ 向量化器初始化成功")
-            
-            # FAISS检索
-            from .retrieval.faiss_search import FAISSSearchEngine
-            self.faiss_retriever = FAISSSearchEngine(
-                index_path="data/vectors/memory_index.bin",
-                dimension=1024  # Qwen3-Embedding-0.6B
-            )
-            logger.info("✅ FAISS检索初始化成功")
-            
-            # 🆕 智能检索器 - 这里会自动注册数据库缓存和检索缓存
-            from .retrieval.smart_retriever import SmartRetriever
-            self.smart_retriever = SmartRetriever(self.db_manager)
-            logger.info("✅ 智能检索器初始化成功")
-            
-            # 关联网络
-            from .association.network import AssociationNetwork
-            self.association_network = AssociationNetwork(self.db_manager)
-            logger.info("✅ 关联网络初始化成功")
-            
-            # 历史检索器
-            from .context.history import HistoryRetriever
-            self.history_retriever = HistoryRetriever(self.db_manager)
-            logger.info("✅ 历史检索器初始化成功")
-            
-            # 记忆评分器
-            from .ranking.scorer import MemoryScorer
-            self.scorer = MemoryScorer()
-            logger.info("✅ 记忆评分器初始化成功")
-            
-        except Exception as e:
-            logger.warning(f"高级组件初始化失败: {e}")
-            self.enable_advanced = False
+    # 组件创建方法
+    def _create_db_manager(self):
+        """创建数据库管理器"""
+        from .init.db_manager import DatabaseManager
+        db_manager = DatabaseManager()
+        if db_manager.connect():
+            db_manager.initialize_database()
+            logger.info("✅ 数据库管理器初始化成功")
+        return db_manager
     
-    def _initialize_async_evaluator(self):
-        """🔥 初始化异步评估器 - Step 11-13的核心 - 使用稳定的启动管理器"""
-        try:
-            from .evaluator.async_evaluator import AsyncMemoryEvaluator
-            from .evaluator.async_startup_manager import initialize_async_evaluator_safely
-            
-            # 创建异步评估器实例
-            self.async_evaluator = AsyncMemoryEvaluator(self.db_manager)
-            logger.info("✅ 异步评估器实例创建成功")
-            
-            # 使用稳定的启动管理器初始化
-            self.async_initialized = initialize_async_evaluator_safely(self.async_evaluator)
-            
-            if self.async_initialized:
-                logger.info("🚀 异步评估器启动成功 - 使用稳定启动管理器")
-            else:
-                logger.warning("⚠️ 异步评估器启动失败，将在后续尝试重新启动")
-                
-        except Exception as e:
-            logger.warning(f"异步评估器初始化失败: {e}")
-            self.async_evaluator = None
-            self.async_initialized = False
+    def _create_memory_store(self):
+        """创建记忆存储"""
+        from .storage.memory_store import MemoryStore
+        memory_store = MemoryStore(db_manager=self.component_manager.get_component('db_manager'))
+        logger.info("✅ 记忆存储初始化成功 (复用数据库连接)")
+        return memory_store
     
-    def _initialize_functional_modules(self):
-        """🔥 初始化功能模块管理器"""
-        try:
-            if not self.db_manager:
-                logger.warning("数据库管理器未初始化，跳过功能模块初始化")
-                return
-            
-            # 初始化记忆搜索管理器
-            self.memory_search_manager = MemorySearchManager(
-                self.db_manager, 
-                self.association_network
-            )
-            logger.info("✅ 记忆搜索管理器初始化成功")
-            
-            # 初始化权重管理器
-            self.weight_manager = WeightManager(self.db_manager)
-            logger.info("✅ 权重管理器初始化成功")
-            
-            # 初始化生命周期管理器
-            self.lifecycle_manager = LifecycleManager(
-                self.db_manager, 
-                self.weight_manager
-            )
-            logger.info("✅ 生命周期管理器初始化成功")
-            
-            # 初始化系统统计管理器
-            try:
-                from .caching.cache_manager import UnifiedCacheManager
-                unified_cache = UnifiedCacheManager.get_instance()
-            except:
-                unified_cache = None
-            
-            self.system_stats_manager = SystemStatsManager(
-                self.db_manager, 
-                unified_cache
-            )
-            logger.info("✅ 系统统计管理器初始化成功")
-            
-            # 初始化情感分析器
-            self.emotion_analyzer = EmotionAnalyzer(
-                model_name="goemotions",
-                use_transformers=True
-            )
-            logger.info("✅ 情感分析器初始化成功")
-            
-            # 初始化用户画像器
-            # 这里可以传入LLM客户端，目前先使用None
-            self.user_profiler = UserProfiler(
-                self.db_manager,
-                llm_client=None  # 可以后续配置
-            )
-            logger.info("✅ 用户画像器初始化成功")
-            
-            # 初始化摘要生成器
-            self.summary_generator = SummaryGenerator(
-                self.db_manager,
-                llm_client=None,  # 可以后续配置
-                user_profiler=self.user_profiler
-            )
-            logger.info("✅ 摘要生成器初始化成功")
-            
-            logger.info("🎯 所有功能模块初始化完成")
-            
-        except Exception as e:
-            logger.error(f"功能模块初始化失败: {e}")
-            # 不抛出异常，确保系统可以继续运行
+    def _create_vectorizer(self):
+        """创建向量化器"""
+        from .embedding.vectorizer import TextVectorizer
+        vectorizer = TextVectorizer()
+        logger.info("✅ 向量化器初始化成功")
+        return vectorizer
     
+    def _create_faiss_retriever(self):
+        """创建FAISS检索器"""
+        from .retrieval.faiss_search import FAISSSearchEngine
+        faiss_retriever = FAISSSearchEngine(
+            index_path="data/vectors/memory_index.bin",
+            dimension=1024  # Qwen3-Embedding-0.6B
+        )
+        logger.info("✅ FAISS检索初始化成功")
+        return faiss_retriever
+    
+    def _create_association_network(self):
+        """创建关联网络"""
+        from .association.network import AssociationNetwork
+        association_network = AssociationNetwork(self.component_manager.get_component('db_manager'))
+        logger.info("✅ 关联网络初始化成功")
+        return association_network
+    
+    def _create_history_retriever(self):
+        """创建历史检索器"""
+        from .context.history import HistoryRetriever
+        history_retriever = HistoryRetriever(self.component_manager.get_component('db_manager'))
+        logger.info("✅ 历史检索器初始化成功")
+        return history_retriever
+    
+    def _create_smart_retriever(self):
+        """创建智能检索器"""
+        from .retrieval.smart_retriever import SmartRetriever
+        smart_retriever = SmartRetriever(self.component_manager.get_component('db_manager'))
+        logger.info("✅ 智能检索器初始化成功")
+        return smart_retriever
+    
+    def _create_scorer(self):
+        """创建记忆评分器"""
+        from .scoring.scorer import MemoryScorer
+        scorer = MemoryScorer()
+        logger.info("✅ 记忆评分器初始化成功")
+        return scorer
+    
+    def _create_async_evaluator(self):
+        """创建异步评估器"""
+        from .evaluation.async_evaluator import AsyncMemoryEvaluator
+        async_evaluator = AsyncMemoryEvaluator(self.component_manager.get_component('db_manager'))
+        logger.info("✅ 异步评估器初始化成功")
+        return async_evaluator
+    
+    def _create_memory_search_manager(self):
+        """创建记忆搜索管理器"""
+        return MemorySearchManager(self.component_manager.get_component('db_manager'))
+    
+    def _create_weight_manager(self):
+        """创建权重管理器"""
+        return WeightManager(self.component_manager.get_component('db_manager'))
+    
+    def _create_lifecycle_manager(self):
+        """创建生命周期管理器"""
+        return LifecycleManager(
+            self.component_manager.get_component('db_manager'),
+            self.component_manager.get_component('weight_manager')
+        )
+    
+    def _create_system_stats_manager(self):
+        """创建系统统计管理器"""
+        return SystemStatsManager(self.component_manager.get_component('db_manager'))
+    
+    def _create_user_profiler(self):
+        """创建用户画像器"""
+        return UserProfiler(self.component_manager.get_component('db_manager'))
+    
+    def _create_summary_generator(self):
+        """创建摘要生成器"""
+        return SummaryGenerator(self.component_manager.get_component('db_manager'))
+    
+    def _create_emotion_analyzer(self):
+        """创建情感分析器"""
+        return EmotionAnalyzer()
+    
+    # === 会话管理 ===
     def ensure_async_initialized(self):
         """确保异步组件已初始化 - 简化版本"""
         if not self.async_initialized and self.async_evaluator:
@@ -290,6 +387,8 @@ class EstiaMemorySystem:
             self.logger.info(f"🔚 结束会话: {self.current_session_id}")
             self.current_session_id = None
             self.session_start_time = None
+
+    # === 13步记忆增强工作流程 ===
 
     def enhance_query(self, user_input: str, context: Optional[Dict] = None) -> str:
         """

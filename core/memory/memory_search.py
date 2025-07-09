@@ -10,10 +10,13 @@ import time
 import logging
 from typing import Dict, Any, List, Optional
 
+# 🔥 使用统一的内部工具
+from .internal import MemoryLayer, handle_memory_errors, ErrorHandlerMixin, QueryBuilder
+
 logger = logging.getLogger(__name__)
 
-class MemorySearchManager:
-    """记忆搜索管理器"""
+class MemorySearchManager(ErrorHandlerMixin):
+    """记忆搜索管理器 - 重构版本"""
     
     def __init__(self, db_manager, association_network=None):
         """
@@ -23,8 +26,10 @@ class MemorySearchManager:
             db_manager: 数据库管理器
             association_network: 关联网络（可选）
         """
+        super().__init__()
         self.db_manager = db_manager
         self.association_network = association_network
+        self.query_builder = QueryBuilder()
         self.logger = logger
     
     def get_memory_search_tools(self) -> List[Dict[str, Any]]:
@@ -166,94 +171,73 @@ class MemorySearchManager:
                 'memories': []
             }
     
+    @handle_memory_errors({'memories': []})
     def search_memories_by_keyword(self, keywords: str, max_results: int = 5, weight_threshold: float = 3.0) -> Dict[str, Any]:
-        """关键词搜索记忆"""
-        try:
-            search_query = """
-                SELECT id, content, type, weight, timestamp, group_id
-                FROM memories 
-                WHERE content LIKE ? 
-                AND weight >= ?
-                AND (archived IS NULL OR archived = 0)
-                ORDER BY weight DESC, timestamp DESC
-                LIMIT ?
-            """
-            
-            results = self.db_manager.execute_query(
-                search_query, 
-                (f'%{keywords}%', weight_threshold, max_results)
-            )
-            
-            memories = []
-            if results:
-                for row in results:
-                    memories.append({
-                        'id': row[0],
-                        'content': row[1],
-                        'type': row[2],
-                        'weight': row[3],
-                        'timestamp': row[4],
-                        'group_id': row[5],
-                        'layer': self._get_memory_layer(row[3])
-                    })
-            
-            return {
-                'success': True,
-                'message': f'找到 {len(memories)} 条包含关键词 "{keywords}" 的记忆',
+        """关键词搜索记忆 - 重构版本"""
+        # 🔥 使用统一的查询构建器
+        query, params = self.query_builder.build_keyword_search_query(
+            keywords, weight_threshold, max_results
+        )
+        
+        results = self.db_manager.execute_query(query, params)
+        
+        memories = []
+        if results:
+            for row in results:
+                memories.append({
+                    'id': row[0],
+                    'content': row[1],
+                    'type': row[2],
+                    'weight': row[3],
+                    'timestamp': row[4],
+                    'group_id': row[5],
+                    'layer': MemoryLayer.get_layer_name(row[3])  # 🔥 使用统一的分层逻辑
+                })
+        
+        return self._create_success_response(
+            f'找到 {len(memories)} 条包含关键词 "{keywords}" 的记忆',
+            {
                 'memories': memories,
                 'search_type': 'keyword',
                 'parameters': {'keywords': keywords, 'weight_threshold': weight_threshold}
             }
-            
-        except Exception as e:
-            self.logger.error(f"关键词搜索失败: {e}")
-            return {'success': False, 'message': str(e), 'memories': []}
+        )
     
+    @handle_memory_errors({'memories': []})
     def search_memories_by_timeframe(self, days_ago: int, max_results: int = 10) -> Dict[str, Any]:
-        """时间范围搜索记忆"""
-        try:
-            current_time = time.time()
-            start_time = current_time - (days_ago * 24 * 3600)
-            
-            search_query = """
-                SELECT id, content, type, weight, timestamp, group_id
-                FROM memories 
-                WHERE timestamp >= ?
-                AND (archived IS NULL OR archived = 0)
-                ORDER BY weight DESC, timestamp DESC
-                LIMIT ?
-            """
-            
-            results = self.db_manager.execute_query(
-                search_query, 
-                (start_time, max_results)
-            )
-            
-            memories = []
-            if results:
-                for row in results:
-                    memories.append({
-                        'id': row[0],
-                        'content': row[1],
-                        'type': row[2],
-                        'weight': row[3],
-                        'timestamp': row[4],
-                        'group_id': row[5],
-                        'layer': self._get_memory_layer(row[3]),
-                        'age_days': (current_time - row[4]) / 86400
-                    })
-            
-            return {
-                'success': True,
-                'message': f'找到 {len(memories)} 条 {days_ago} 天内的记忆',
+        """时间范围搜索记忆 - 重构版本"""
+        current_time = time.time()
+        start_time = current_time - (days_ago * 24 * 3600)
+        
+        # 🔥 使用统一的查询构建器
+        query, params = self.query_builder.build_timeframe_search_query(
+            start_time, None, max_results
+        )
+        
+        results = self.db_manager.execute_query(query, params)
+        
+        memories = []
+        if results:
+            for row in results:
+                memories.append({
+                    'id': row[0],
+                    'content': row[1],
+                    'type': row[2],
+                    'weight': row[3],
+                    'timestamp': row[4],
+                    'group_id': row[5],
+                    'layer': MemoryLayer.get_layer_name(row[3]),  # 🔥 使用统一的分层逻辑
+                    'age_days': (current_time - row[4]) / 86400
+                })
+        
+        return self._create_success_response(
+            f'找到 {len(memories)} 条 {days_ago} 天内的记忆',
+            {
                 'memories': memories,
                 'search_type': 'timeframe',
                 'parameters': {'days_ago': days_ago}
             }
-            
-        except Exception as e:
-            self.logger.error(f"时间范围搜索失败: {e}")
-            return {'success': False, 'message': str(e), 'memories': []}
+        )
     
     def search_core_memories(self, category: str = '') -> Dict[str, Any]:
         """搜索核心记忆"""
@@ -400,13 +384,5 @@ class MemorySearchManager:
             self.logger.error(f"获取分组记忆失败: {e}")
             return []
     
-    def _get_memory_layer(self, weight: float) -> str:
-        """根据权重确定记忆层级"""
-        if 9.0 <= weight <= 10.0:
-            return "核心记忆"  # 永久保留
-        elif 7.0 <= weight < 9.0:
-            return "归档记忆"  # 长期保留
-        elif 4.0 <= weight < 7.0:
-            return "长期记忆"  # 定期清理
-        else:
-            return "短期记忆"  # 快速过期 
+    # 🔥 删除重复的分层逻辑，使用统一的MemoryLayer
+    # 原来的 _get_memory_layer 方法已被 MemoryLayer.get_layer_name 替代 

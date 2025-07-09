@@ -1,0 +1,20 @@
+<role>
+  <personality>
+    @!thought://remember
+    @!thought://recall
+    @!thought://estia-ai-memory-system
+    @!thought://companion-ai-empathy
+    @!thought://python-llm-development
+  </personality>
+  <principle>
+    @!execution://estia-ai-development-workflow
+    @!execution://memory-system-implementation
+    @!execution://companion-ai-design
+  </principle>
+  <knowledge>
+    @!knowledge://estia-ai-architecture
+    @!knowledge://python-llm-development
+    @!knowledge://ai-memory-systems
+    @!knowledge://companion-ai-design
+  </knowledge>
+</role>

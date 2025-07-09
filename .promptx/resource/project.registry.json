@@ -1,0 +1,168 @@
+{
+  "version": "2.0.0",
+  "source": "project",
+  "metadata": {
+    "version": "2.0.0",
+    "description": "project 级资源注册表",
+    "createdAt": "2025-07-09T09:22:41.469Z",
+    "updatedAt": "2025-07-09T09:22:41.473Z",
+    "resourceCount": 11
+  },
+  "resources": [
+    {
+      "id": "estia-ai-developer",
+      "source": "project",
+      "protocol": "role",
+      "name": "Estia Ai Developer 角色",
+      "description": "专业角色，提供特定领域的专业能力",
+      "reference": "@project://.promptx/resource/domain/estia-ai-developer/estia-ai-developer.role.md",
+      "metadata": {
+        "createdAt": "2025-07-09T09:22:41.470Z",
+        "updatedAt": "2025-07-09T09:22:41.470Z",
+        "scannedAt": "2025-07-09T09:22:41.470Z"
+      }
+    },
+    {
+      "id": "companion-ai-empathy",
+      "source": "project",
+      "protocol": "thought",
+      "name": "Companion Ai Empathy 思维模式",
+      "description": "思维模式，指导AI的思考方式",
+      "reference": "@project://.promptx/resource/domain/estia-ai-developer/thought/companion-ai-empathy.thought.md",
+      "metadata": {
+        "createdAt": "2025-07-09T09:22:41.470Z",
+        "updatedAt": "2025-07-09T09:22:41.470Z",
+        "scannedAt": "2025-07-09T09:22:41.470Z"
+      }
+    },
+    {
+      "id": "estia-ai-memory-system",
+      "source": "project",
+      "protocol": "thought",
+      "name": "Estia Ai Memory System 思维模式",
+      "description": "思维模式，指导AI的思考方式",
+      "reference": "@project://.promptx/resource/domain/estia-ai-developer/thought/estia-ai-memory-system.thought.md",
+      "metadata": {
+        "createdAt": "2025-07-09T09:22:41.470Z",
+        "updatedAt": "2025-07-09T09:22:41.470Z",
+        "scannedAt": "2025-07-09T09:22:41.470Z"
+      }
+    },
+    {
+      "id": "python-llm-development",
+      "source": "project",
+      "protocol": "thought",
+      "name": "Python Llm Development 思维模式",
+      "description": "思维模式，指导AI的思考方式",
+      "reference": "@project://.promptx/resource/domain/estia-ai-developer/thought/python-llm-development.thought.md",
+      "metadata": {
+        "createdAt": "2025-07-09T09:22:41.470Z",
+        "updatedAt": "2025-07-09T09:22:41.470Z",
+        "scannedAt": "2025-07-09T09:22:41.470Z"
+      }
+    },
+    {
+      "id": "companion-ai-design",
+      "source": "project",
+      "protocol": "execution",
+      "name": "Companion Ai Design 执行模式",
+      "description": "执行模式，定义具体的行为模式",
+      "reference": "@project://.promptx/resource/domain/estia-ai-developer/execution/companion-ai-design.execution.md",
+      "metadata": {
+        "createdAt": "2025-07-09T09:22:41.470Z",
+        "updatedAt": "2025-07-09T09:22:41.470Z",
+        "scannedAt": "2025-07-09T09:22:41.470Z"
+      }
+    },
+    {
+      "id": "estia-ai-development-workflow",
+      "source": "project",
+      "protocol": "execution",
+      "name": "Estia Ai Development Workflow 执行模式",
+      "description": "执行模式，定义具体的行为模式",
+      "reference": "@project://.promptx/resource/domain/estia-ai-developer/execution/estia-ai-development-workflow.execution.md",
+      "metadata": {
+        "createdAt": "2025-07-09T09:22:41.470Z",
+        "updatedAt": "2025-07-09T09:22:41.470Z",
+        "scannedAt": "2025-07-09T09:22:41.470Z"
+      }
+    },
+    {
+      "id": "memory-system-implementation",
+      "source": "project",
+      "protocol": "execution",
+      "name": "Memory System Implementation 执行模式",
+      "description": "执行模式，定义具体的行为模式",
+      "reference": "@project://.promptx/resource/domain/estia-ai-developer/execution/memory-system-implementation.execution.md",
+      "metadata": {
+        "createdAt": "2025-07-09T09:22:41.470Z",
+        "updatedAt": "2025-07-09T09:22:41.470Z",
+        "scannedAt": "2025-07-09T09:22:41.470Z"
+      }
+    },
+    {
+      "id": "ai-memory-systems",
+      "source": "project",
+      "protocol": "knowledge",
+      "name": "Ai Memory Systems 知识库",
+      "description": "知识库，提供专业知识和信息",
+      "reference": "@project://.promptx/resource/domain/estia-ai-developer/knowledge/ai-memory-systems.knowledge.md",
+      "metadata": {
+        "createdAt": "2025-07-09T09:22:41.470Z",
+        "updatedAt": "2025-07-09T09:22:41.470Z",
+        "scannedAt": "2025-07-09T09:22:41.470Z"
+      }
+    },
+    {
+      "id": "companion-ai-design",
+      "source": "project",
+      "protocol": "knowledge",
+      "name": "Companion Ai Design 知识库",
+      "description": "知识库，提供专业知识和信息",
+      "reference": "@project://.promptx/resource/domain/estia-ai-developer/knowledge/companion-ai-design.knowledge.md",
+      "metadata": {
+        "createdAt": "2025-07-09T09:22:41.470Z",
+        "updatedAt": "2025-07-09T09:22:41.470Z",
+        "scannedAt": "2025-07-09T09:22:41.470Z"
+      }
+    },
+    {
+      "id": "estia-ai-architecture",
+      "source": "project",
+      "protocol": "knowledge",
+      "name": "Estia Ai Architecture 知识库",
+      "description": "知识库，提供专业知识和信息",
+      "reference": "@project://.promptx/resource/domain/estia-ai-developer/knowledge/estia-ai-architecture.knowledge.md",
+      "metadata": {
+        "createdAt": "2025-07-09T09:22:41.471Z",
+        "updatedAt": "2025-07-09T09:22:41.471Z",
+        "scannedAt": "2025-07-09T09:22:41.471Z"
+      }
+    },
+    {
+      "id": "python-llm-development",
+      "source": "project",
+      "protocol": "knowledge",
+      "name": "Python Llm Development 知识库",
+      "description": "知识库，提供专业知识和信息",
+      "reference": "@project://.promptx/resource/domain/estia-ai-developer/knowledge/python-llm-development.knowledge.md",
+      "metadata": {
+        "createdAt": "2025-07-09T09:22:41.471Z",
+        "updatedAt": "2025-07-09T09:22:41.471Z",
+        "scannedAt": "2025-07-09T09:22:41.471Z"
+      }
+    }
+  ],
+  "stats": {
+    "totalResources": 11,
+    "byProtocol": {
+      "role": 1,
+      "thought": 3,
+      "execution": 3,
+      "knowledge": 4
+    },
+    "bySource": {
+      "project": 11
+    }
+  }
+}

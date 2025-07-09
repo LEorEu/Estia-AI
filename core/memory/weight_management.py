@@ -11,10 +11,13 @@ import json
 import logging
 from typing import Dict, Any, List, Optional
 
+# 🔥 使用统一的内部工具
+from .internal import MemoryLayer, handle_memory_errors, ErrorHandlerMixin, QueryBuilder
+
 logger = logging.getLogger(__name__)
 
-class WeightManager:
-    """权重管理器 - 优化版本"""
+class WeightManager(ErrorHandlerMixin):
+    """权重管理器 - 重构版本"""
     
     def __init__(self, db_manager):
         """
@@ -23,7 +26,9 @@ class WeightManager:
         Args:
             db_manager: 数据库管理器
         """
+        super().__init__()
         self.db_manager = db_manager
+        self.query_builder = QueryBuilder()
         self.logger = logger
         
         # 🔥 优化：权重调整参数（降低增益幅度）
@@ -42,9 +47,10 @@ class WeightManager:
             }
         }
     
+    @handle_memory_errors({'success': False, 'message': '权重更新失败'})
     def update_memory_weight_dynamically(self, memory_id: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
         """
-        动态更新记忆权重（优化版本）
+        动态更新记忆权重（重构版本）
         
         Args:
             memory_id: 记忆ID
@@ -54,7 +60,7 @@ class WeightManager:
             Dict: 更新结果
         """
         if not self.db_manager:
-            return {'success': False, 'message': '数据库未初始化'}
+            return self._create_error_response('数据库未初始化')
         
         try:
             # 获取当前记忆信息
@@ -179,23 +185,16 @@ class WeightManager:
             self.logger.error(f"更新记忆权重失败: {e}")
     
     def get_memory_layer(self, weight: float) -> str:
-        """根据权重确定记忆层级"""
-        return self._get_memory_layer(weight)
+        """根据权重确定记忆层级 - 委托给统一的MemoryLayer"""
+        return MemoryLayer.get_layer_name(weight)
     
     def _get_memory_layer(self, weight: float) -> str:
-        """内部方法：根据权重确定记忆层级"""
-        if 9.0 <= weight <= 10.0:
-            return "core"  # 核心记忆
-        elif 7.0 <= weight < 9.0:
-            return "archive"  # 归档记忆
-        elif 4.0 <= weight < 7.0:
-            return "long_term"  # 长期记忆
-        else:
-            return "short_term"  # 短期记忆
+        """内部方法：根据权重确定记忆层级 - 委托给统一的MemoryLayer"""
+        return MemoryLayer.get_layer_key(weight)
     
     def get_layered_context_info(self, memories: List[Dict]) -> Dict[str, Any]:
         """
-        获取分层上下文信息
+        获取分层上下文信息 - 委托给统一的MemoryLayer
         
         Args:
             memories: 记忆列表
@@ -203,39 +202,11 @@ class WeightManager:
         Returns:
             Dict: 分层统计信息
         """
-        if not memories:
-            return {}
-        
-        layer_stats = {
-            "核心记忆": [],
-            "归档记忆": [],
-            "长期记忆": [],
-            "短期记忆": []
-        }
-        
-        for memory in memories:
-            weight = memory.get('weight', 1.0)
-            layer = self._get_memory_layer_name(weight)
-            layer_stats[layer].append(memory)
-        
-        return {
-            'layer_distribution': {
-                layer: len(memories_in_layer) 
-                for layer, memories_in_layer in layer_stats.items()
-            },
-            'layered_memories': layer_stats
-        }
+        return MemoryLayer.get_layered_stats(memories)
     
     def _get_memory_layer_name(self, weight: float) -> str:
-        """根据权重确定记忆层级名称（中文）"""
-        if 9.0 <= weight <= 10.0:
-            return "核心记忆"
-        elif 7.0 <= weight < 9.0:
-            return "归档记忆"
-        elif 4.0 <= weight < 7.0:
-            return "长期记忆"
-        else:
-            return "短期记忆"
+        """根据权重确定记忆层级名称（中文）- 委托给统一的MemoryLayer"""
+        return MemoryLayer.get_layer_name(weight)
     
     def batch_update_weights(self, memory_ids: List[str], reason: str = "batch_update") -> Dict[str, Any]:
         """

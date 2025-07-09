@@ -11,9 +11,12 @@ import json
 import logging
 from typing import Dict, Any, List, Optional
 
+# 🔥 使用统一的内部工具
+from .internal import MemoryLayer, handle_memory_errors, ErrorHandlerMixin, QueryBuilder
+
 logger = logging.getLogger(__name__)
 
-class LifecycleManager:
+class LifecycleManager(ErrorHandlerMixin):
     """记忆生命周期管理器"""
     
     def __init__(self, db_manager, weight_manager=None):
@@ -24,8 +27,10 @@ class LifecycleManager:
             db_manager: 数据库管理器
             weight_manager: 权重管理器（可选）
         """
+        super().__init__()
         self.db_manager = db_manager
         self.weight_manager = weight_manager
+        self.query_builder = QueryBuilder()
         self.logger = logger
         
         # 生命周期配置
@@ -38,6 +43,7 @@ class LifecycleManager:
             'batch_size': 100  # 批处理大小
         }
     
+    @handle_memory_errors({'success': False, 'message': '归档操作失败'})
     def archive_old_memories(self, days_threshold: int = None, archive_weight_penalty: float = None) -> Dict[str, Any]:
         """
         归档过期记忆（软删除，不物理删除）
@@ -49,61 +55,59 @@ class LifecycleManager:
         Returns:
             Dict: 归档结果
         """
+        # 使用默认配置
+        days_threshold = days_threshold or self.lifecycle_config['archive_threshold_days']
+        archive_weight_penalty = archive_weight_penalty or self.lifecycle_config['archive_weight_penalty']
+        
+        current_time = time.time()
+        cutoff_time = current_time - (days_threshold * 24 * 3600)
+        
+        # 确保archived字段存在
         try:
-            # 使用默认配置
-            days_threshold = days_threshold or self.lifecycle_config['archive_threshold_days']
-            archive_weight_penalty = archive_weight_penalty or self.lifecycle_config['archive_weight_penalty']
-            
-            current_time = time.time()
-            cutoff_time = current_time - (days_threshold * 24 * 3600)
-            
-            # 确保archived字段存在
-            try:
-                self.db_manager.execute_query("ALTER TABLE memories ADD COLUMN archived INTEGER DEFAULT 0")
-            except:
-                pass  # 字段可能已存在
-            
-            # 归档短期记忆（权重4.0以下）且超过阈值的记忆
-            archive_query = """
-                UPDATE memories 
-                SET archived = 1,
-                    weight = weight * ?,
-                    metadata = CASE 
-                        WHEN metadata IS NULL THEN ?
-                        ELSE json_patch(metadata, ?)
-                    END
-                WHERE weight < 4.0 
-                AND timestamp < ? 
-                AND archived = 0
-                AND type NOT IN ('system', 'summary')
-            """
-            
-            metadata_json = json.dumps({
-                "archived_at": current_time,
-                "archive_reason": "automatic_cleanup",
-                "original_weight": "preserved_in_calculation"
-            })
-            
-            result = self.db_manager.execute_query(
-                archive_query, 
-                (archive_weight_penalty, metadata_json, metadata_json, cutoff_time)
-            )
-            
-            archived_count = result.rowcount if result and hasattr(result, 'rowcount') else 0
-            
-            self.logger.info(f"归档了 {archived_count} 条过期短期记忆")
-            
-            return {
-                'success': True,
-                'archived_count': archived_count,
-                'threshold_days': days_threshold,
-                'weight_penalty': archive_weight_penalty,
-                'message': f'成功归档 {archived_count} 条过期记忆'
-            }
-            
-        except Exception as e:
-            self.logger.error(f"归档过期记忆失败: {e}")
-            return {'success': False, 'message': f'归档失败: {str(e)}'}
+            self.db_manager.execute_query("ALTER TABLE memories ADD COLUMN archived INTEGER DEFAULT 0")
+        except:
+            pass  # 字段可能已存在
+        
+        # 🔥 使用统一的层级范围获取短期记忆的权重上限
+        min_weight, max_weight = MemoryLayer.get_weight_range('short_term')
+        
+        # 归档短期记忆且超过阈值的记忆
+        archive_query = """
+            UPDATE memories 
+            SET archived = 1,
+                weight = weight * ?,
+                metadata = CASE 
+                    WHEN metadata IS NULL THEN ?
+                    ELSE json_patch(metadata, ?)
+                END
+            WHERE weight < ? 
+            AND timestamp < ? 
+            AND archived = 0
+            AND type NOT IN ('system', 'summary')
+        """
+        
+        metadata_json = json.dumps({
+            "archived_at": current_time,
+            "archive_reason": "automatic_cleanup",
+            "original_weight": "preserved_in_calculation"
+        })
+        
+        result = self.db_manager.execute_query(
+            archive_query, 
+            (archive_weight_penalty, metadata_json, metadata_json, max_weight, cutoff_time)
+        )
+        
+        archived_count = result.rowcount if result and hasattr(result, 'rowcount') else 0
+        
+        self.logger.info(f"归档了 {archived_count} 条过期短期记忆")
+        
+        return {
+            'success': True,
+            'archived_count': archived_count,
+            'threshold_days': days_threshold,
+            'weight_penalty': archive_weight_penalty,
+            'message': f'成功归档 {archived_count} 条过期记忆'
+        }
     
     def restore_archived_memories(self, memory_ids: List[str] = None, restore_weight_bonus: float = None) -> Dict[str, Any]:
         """
@@ -268,97 +272,70 @@ class LifecycleManager:
             self.logger.error(f"清理过期记忆失败: {e}")
             return {'success': False, 'message': f'清理失败: {str(e)}'}
     
+    @handle_memory_errors({'error': '获取生命周期统计失败'})
     def get_memory_lifecycle_stats(self) -> Dict[str, Any]:
         """
-        获取记忆生命周期统计
+        获取记忆生命周期统计 - 重构版本
         
         Returns:
             Dict: 生命周期统计信息
         """
-        try:
-            # 按权重范围统计记忆数量
-            stats_query = """
-                SELECT 
-                    CASE 
-                        WHEN weight >= 9.0 THEN '核心记忆'
-                        WHEN weight >= 7.0 THEN '归档记忆'
-                        WHEN weight >= 4.0 THEN '长期记忆'
-                        ELSE '短期记忆'
-                    END as layer,
-                    COUNT(*) as count,
-                    AVG(weight) as avg_weight,
-                    MIN(timestamp) as oldest_timestamp,
-                    MAX(timestamp) as newest_timestamp
-                FROM memories 
-                WHERE (archived IS NULL OR archived = 0)
-                AND (deleted IS NULL OR deleted = 0)
-                GROUP BY 
-                    CASE 
-                        WHEN weight >= 9.0 THEN '核心记忆'
-                        WHEN weight >= 7.0 THEN '归档记忆'
-                        WHEN weight >= 4.0 THEN '长期记忆'
-                        ELSE '短期记忆'
-                    END
-            """
-            
-            results = self.db_manager.execute_query(stats_query)
-            
-            layer_stats = {}
-            total_active = 0
-            
-            if results:
-                for row in results:
-                    layer = row[0]
-                    count = row[1]
-                    total_active += count
-                    
-                    layer_stats[layer] = {
-                        'count': count,
-                        'avg_weight': round(row[2], 2),
-                        'oldest_days': int((time.time() - row[3]) / 86400) if row[3] else 0,
-                        'newest_days': int((time.time() - row[4]) / 86400) if row[4] else 0
-                    }
-            
-            # 获取归档和删除统计
-            archive_query = """
-                SELECT 
-                    COUNT(*) as archived_count,
-                    AVG(weight) as avg_archived_weight
-                FROM memories 
-                WHERE archived = 1
-                AND (deleted IS NULL OR deleted = 0)
-            """
-            
-            archive_result = self.db_manager.execute_query(archive_query)
-            archived_count = archive_result[0][0] if archive_result else 0
-            avg_archived_weight = archive_result[0][1] if archive_result and archive_result[0][1] else 0
-            
-            delete_query = """
-                SELECT COUNT(*) as deleted_count
-                FROM memories 
-                WHERE deleted = 1
-            """
-            
-            delete_result = self.db_manager.execute_query(delete_query)
-            deleted_count = delete_result[0][0] if delete_result else 0
-            
-            return {
-                'layer_statistics': layer_stats,
-                'total_active_memories': total_active,
-                'archived_memories': {
-                    'count': archived_count,
-                    'avg_weight': round(avg_archived_weight, 2)
-                },
-                'deleted_memories': {
-                    'count': deleted_count
-                },
-                'lifecycle_config': self.lifecycle_config,
-                'last_updated': time.time()
-            }
-            
-        except Exception as e:
-            self.logger.error(f"获取生命周期统计失败: {e}")
-            return {'error': str(e)}
+        # 🔥 使用统一的权重分布查询构建器
+        query, params = self.query_builder.build_weight_distribution_query()
+        results = self.db_manager.execute_query(query, params)
+        
+        layer_stats = {}
+        total_active = 0
+        
+        if results:
+            for row in results:
+                layer = row[0]
+                count = row[1]
+                total_active += count
+                
+                layer_stats[layer] = {
+                    'count': count,
+                    'avg_weight': round(row[2], 2),
+                    'oldest_days': int((time.time() - row[5]) / 86400) if row[5] else 0,
+                    'newest_days': int((time.time() - row[6]) / 86400) if row[6] else 0
+                }
+        
+        # 获取归档和删除统计
+        archive_query = """
+            SELECT 
+                COUNT(*) as archived_count,
+                AVG(weight) as avg_archived_weight
+            FROM memories 
+            WHERE archived = 1
+            AND (deleted IS NULL OR deleted = 0)
+        """
+        
+        archive_result = self.db_manager.execute_query(archive_query)
+        archived_count = archive_result[0][0] if archive_result else 0
+        avg_archived_weight = archive_result[0][1] if archive_result and archive_result[0][1] else 0
+        
+        delete_query = """
+            SELECT COUNT(*) as deleted_count
+            FROM memories 
+            WHERE deleted = 1
+        """
+        
+        delete_result = self.db_manager.execute_query(delete_query)
+        deleted_count = delete_result[0][0] if delete_result else 0
+        
+        return {
+            'layer_statistics': layer_stats,
+            'total_active_memories': total_active,
+            'archived_memories': {
+                'count': archived_count,
+                'avg_weight': round(avg_archived_weight, 2)
+            },
+            'deleted_memories': {
+                'count': deleted_count
+            },
+            'lifecycle_config': self.lifecycle_config,
+            'last_updated': time.time()
+        }
     
     def schedule_lifecycle_maintenance(self) -> Dict[str, Any]:
         """
