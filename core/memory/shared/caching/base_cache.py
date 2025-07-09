@@ -144,7 +144,7 @@ class BaseCache(CacheInterface[K, V, M], Generic[K, V, M]):
             if metadata is not None:
                 self._metadata[key] = metadata
             elif key not in self._metadata:
-                self._metadata[key] = {} if isinstance({}, M) else None  # type: ignore
+                self._metadata[key] = {}  # 移除有问题的类型检查
             
             # 更新时间信息
             if not is_update:

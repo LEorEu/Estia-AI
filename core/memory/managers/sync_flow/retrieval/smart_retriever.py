@@ -11,7 +11,7 @@
 import logging
 from typing import List, Dict, Any, Optional
 from ..init.db_manager import DatabaseManager
-from ..memory_cache.cache_manager import CacheManager
+from ....shared.caching.cache_manager import UnifiedCacheManager
 
 logger = logging.getLogger(__name__)
 
@@ -27,17 +27,16 @@ class SmartRetriever:
             db_manager: 数据库管理器
         """
         self.db_manager = db_manager
-        self.cache_manager = CacheManager(db_manager)
+        self.cache_manager = UnifiedCacheManager.get_instance()
         self.logger = logger
         
         # 初始化缓存系统
         try:
-            self.cache_manager.initialize_cache()
             self.logger.info("智能缓存系统已初始化")
             # 🆕 注册数据库缓存到统一缓存管理器
             try:
-                from ..caching.cache_adapters import DbCacheAdapter, SmartRetrieverCacheAdapter
-                from ..caching.cache_manager import UnifiedCacheManager
+                from ...shared.caching.cache_adapters import DbCacheAdapter, SmartRetrieverCacheAdapter
+                from ...shared.caching.cache_manager import UnifiedCacheManager
                 
                 # 注册数据库缓存适配器
                 db_adapter = DbCacheAdapter(self.cache_manager)
@@ -69,7 +68,7 @@ class SmartRetriever:
             # 🆕 0. 优先从统一缓存获取热缓存记忆
             unified_cache = None
             try:
-                from ..caching.cache_manager import UnifiedCacheManager
+                from ...shared.caching.cache_manager import UnifiedCacheManager
                 unified_cache = UnifiedCacheManager.get_instance()
             except Exception as e:
                 self.logger.debug(f"统一缓存管理器不可用: {e}")
@@ -413,7 +412,7 @@ class SmartRetriever:
         """
         # 优先使用统一缓存管理器
         try:
-            from ..caching.cache_manager import UnifiedCacheManager
+            from ...shared.caching.cache_manager import UnifiedCacheManager
             unified_cache = UnifiedCacheManager.get_instance()
             if hasattr(unified_cache, 'record_memory_access'):
                 unified_cache.record_memory_access(memory_id, access_weight)
@@ -434,7 +433,7 @@ class SmartRetriever:
         """获取缓存统计信息"""
         # 优先使用统一缓存管理器
         try:
-            from ..caching.cache_manager import UnifiedCacheManager
+            from ...shared.caching.cache_manager import UnifiedCacheManager
             unified_cache = UnifiedCacheManager.get_instance()
             if hasattr(unified_cache, 'get_business_cache_stats'):
                 stats = unified_cache.get_business_cache_stats()

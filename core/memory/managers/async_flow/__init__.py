@@ -9,8 +9,13 @@
 
 import asyncio
 import logging
-from typing import Dict, Any, Optional
-from ...internal import handle_memory_errors, ErrorHandlerMixin
+from typing import Dict, Any, Optional, List
+from ...shared.internal import handle_memory_errors, ErrorHandlerMixin
+
+# 导入迁移的核心模块
+from .tools.memory_search_tools import MemorySearchManager
+from .evaluator.async_evaluator import AsyncMemoryEvaluator
+from .weight_management import WeightManager
 
 logger = logging.getLogger(__name__)
 
@@ -25,10 +30,29 @@ class AsyncFlowManager(ErrorHandlerMixin):
             components: 所需的组件字典
         """
         super().__init__()
-        self.async_evaluator = components.get('async_evaluator')
-        self.weight_manager = components.get('weight_manager')
-        self.layer_manager = components.get('layer_manager')
+        self.db_manager = components.get('db_manager')
         self.association_network = components.get('association_network')
+        
+        # 🔥 初始化迁移的核心模块
+        self.memory_search_manager = None
+        self.async_evaluator = None
+        self.weight_manager = None
+        
+        if self.db_manager:
+            # 初始化LLM搜索工具管理器
+            self.memory_search_manager = MemorySearchManager(
+                self.db_manager, 
+                self.association_network
+            )
+            
+            # 初始化异步评估器
+            self.async_evaluator = AsyncMemoryEvaluator(self.db_manager)
+            
+            # 初始化权重管理器
+            self.weight_manager = WeightManager(self.db_manager)
+        
+        # 传统组件（保持兼容性）
+        self.layer_manager = components.get('layer_manager')
         self.summary_generator = components.get('summary_generator')
         
         self.evaluation_queue = asyncio.Queue()
@@ -117,13 +141,25 @@ class AsyncFlowManager(ErrorHandlerMixin):
             return {'weight': 1.0, 'emotion': 'neutral', 'topic': 'general'}
         
         try:
-            evaluation_context = {
-                'user_input': task['user_input'],
-                'ai_response': task['ai_response'],
-                'context': task.get('context', {})
+            # 🔥 使用正确的异步评估器接口
+            await self.async_evaluator.queue_dialogue_for_evaluation(
+                user_input=task['user_input'],
+                ai_response=task['ai_response'],
+                session_id=task.get('context', {}).get('session_id'),
+                context_memories=task.get('context', {}).get('context_memories', [])
+            )
+            
+            # 简化版直接返回基础评估
+            # TODO: 完整的LLM评估需要启动评估器工作线程
+            estimated_weight = self._estimate_dialogue_weight(task)
+            
+            result = {
+                'weight': estimated_weight,
+                'emotion': 'neutral',
+                'topic': 'general',
+                'super_group': 'dialogue'
             }
             
-            result = await self.async_evaluator.evaluate_dialogue_importance(evaluation_context)
             self.logger.debug(f"💭 LLM评估完成: 权重={result.get('weight', 1.0)}")
             
             return result
@@ -141,25 +177,81 @@ class AsyncFlowManager(ErrorHandlerMixin):
             evaluation: 评估结果
         """
         try:
+            if not self.weight_manager:
+                self.logger.warning("权重管理器未初始化")
+                return
+                
             memory_ids = task['memory_ids']
             new_weight = evaluation.get('weight', 1.0)
             
+            # 🔥 使用正确的权重管理器方法
+            context = {
+                'change_reason': 'async_evaluation',
+                'evaluation_result': evaluation
+            }
+            
             # 更新用户输入记忆权重
             if memory_ids.get('user_memory_id'):
-                await self.weight_manager.update_weight_async(
-                    memory_ids['user_memory_id'], new_weight
+                result = self.weight_manager.update_memory_weight_dynamically(
+                    memory_ids['user_memory_id'], context
                 )
+                if result.get('success'):
+                    self.logger.debug(f"用户记忆权重更新: {result.get('message')}")
             
             # 更新AI回复记忆权重
             if memory_ids.get('ai_memory_id'):
-                await self.weight_manager.update_weight_async(
-                    memory_ids['ai_memory_id'], new_weight
+                result = self.weight_manager.update_memory_weight_dynamically(
+                    memory_ids['ai_memory_id'], context
                 )
+                if result.get('success'):
+                    self.logger.debug(f"AI记忆权重更新: {result.get('message')}")
                 
             self.logger.debug(f"⚖️ 权重更新完成: {new_weight}")
             
         except Exception as e:
             self.logger.error(f"权重更新失败: {e}")
+    
+    def _estimate_dialogue_weight(self, task: Dict[str, Any]) -> float:
+        """
+        估算对话权重（简化版本）
+        
+        Args:
+            task: 评估任务
+            
+        Returns:
+            float: 估算的权重值
+        """
+        try:
+            user_input = task.get('user_input', '')
+            ai_response = task.get('ai_response', '')
+            
+            base_weight = 1.0
+            
+            # 基于长度的权重调整
+            total_length = len(user_input) + len(ai_response)
+            if total_length > 200:
+                base_weight += 0.5
+            if total_length > 500:
+                base_weight += 0.5
+                
+            # 基于关键词的权重调整
+            important_keywords = ['重要', '记住', '提醒', '喜欢', '不喜欢', '偏好']
+            for keyword in important_keywords:
+                if keyword in user_input or keyword in ai_response:
+                    base_weight += 0.3
+                    break
+            
+            # 基于问号数量（表示交互性）
+            question_count = user_input.count('?') + user_input.count('？')
+            if question_count > 0:
+                base_weight += min(question_count * 0.2, 0.6)
+            
+            # 确保权重在合理范围内
+            return max(0.5, min(base_weight, 5.0))
+            
+        except Exception as e:
+            self.logger.error(f"权重估算失败: {e}")
+            return 1.0
     
     async def _adjust_memory_layers(self, memory_ids: Dict[str, Any]):
         """
@@ -237,3 +329,48 @@ class AsyncFlowManager(ErrorHandlerMixin):
             'queue_size': self.evaluation_queue.qsize(),
             'status': 'active' if self.is_running else 'stopped'
         }
+    
+    # 🔥 LLM搜索工具集成
+    def get_memory_search_tools(self) -> List[Dict[str, Any]]:
+        """
+        获取LLM可用的记忆搜索工具定义
+        供LLM主动查询记忆使用
+        
+        Returns:
+            List: 工具定义列表
+        """
+        if not self.memory_search_manager:
+            return []
+        
+        return self.memory_search_manager.get_memory_search_tools()
+    
+    def execute_memory_search_tool(self, tool_name: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        执行记忆搜索工具（供LLM调用）
+        
+        Args:
+            tool_name: 工具名称
+            parameters: 工具参数
+            
+        Returns:
+            Dict: 搜索结果
+        """
+        if not self.memory_search_manager:
+            return {
+                'success': False,
+                'message': '记忆搜索管理器未初始化',
+                'memories': []
+            }
+        
+        try:
+            result = self.memory_search_manager.execute_memory_search_tool(tool_name, parameters)
+            self.logger.debug(f"🔍 LLM搜索工具执行: {tool_name} - 找到 {len(result.get('memories', []))} 条记忆")
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"LLM搜索工具执行失败: {e}")
+            return {
+                'success': False,
+                'message': f'工具执行失败: {str(e)}',
+                'memories': []
+            }

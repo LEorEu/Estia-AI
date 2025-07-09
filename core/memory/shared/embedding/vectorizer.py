@@ -105,6 +105,9 @@ class TextVectorizer:
             
         self.model_type = model_type or self.DEFAULT_MODEL
         self.model_name = model_name or self.DEFAULT_MODEL_NAME
+        if self.model_name is None:
+            self.model_name = self.DEFAULT_MODEL_NAME
+            logger.warning("模型名称为None，使用默认模型")
         self.api_key = api_key
         self.device = device
         self.use_cache = use_cache and EmbeddingCache is not None
@@ -147,8 +150,8 @@ class TextVectorizer:
             return
             
         try:
-            from ..caching.cache_manager import UnifiedCacheManager
-            from ..caching.cache_adapters import EnhancedMemoryCacheAdapter
+            from ...shared.caching.cache_manager import UnifiedCacheManager
+            from ...shared.caching.cache_adapters import EnhancedMemoryCacheAdapter
             
             unified_cache = UnifiedCacheManager.get_instance()
             
@@ -198,10 +201,21 @@ class TextVectorizer:
             os.environ['TRANSFORMERS_OFFLINE'] = '1'
             
             logger.info(f"🔧 使用项目模型缓存目录: {self.model_cache_dir}")
+            
+            # 检查model_name是否有效
+            if self.model_name is None:
+                logger.error("模型名称未设置")
+                raise ValueError("模型名称未设置")
+            
+            # 确保model_name是字符串
+            if not isinstance(self.model_name, str):
+                logger.error(f"模型名称类型错误: {type(self.model_name)}")
+                self.model_name = str(self.model_name)
+            
             logger.info(f"🔄 加载模型: {self.model_name}")
             
             try:
-                # 尝试从项目缓存加载
+                # 尝试从项目缓存加载（参考旧系统的简洁方式）
                 self.model = SentenceTransformer(
                     self.model_name,
                     device=self.device,
@@ -213,7 +227,7 @@ class TextVectorizer:
                 logger.warning(f"项目缓存加载失败: {offline_error}")
                 logger.info("🌐 尝试在线模式...")
                 
-                # 清除离线设置，允许联网下载
+                # 清除离线设置，允许联网下载（参考旧系统）
                 if 'HF_HUB_OFFLINE' in os.environ:
                     del os.environ['HF_HUB_OFFLINE']
                 if 'TRANSFORMERS_OFFLINE' in os.environ:
@@ -326,7 +340,7 @@ class TextVectorizer:
         # 尝试使用统一缓存管理器
         unified_cache = None
         try:
-            from ..caching.cache_manager import UnifiedCacheManager
+            from ...shared.caching.cache_manager import UnifiedCacheManager
             unified_cache = UnifiedCacheManager.get_instance()
         except Exception as e:
             logger.debug(f"统一缓存管理器不可用: {e}")
@@ -583,7 +597,7 @@ class TextVectorizer:
         # 尝试使用统一缓存管理器
         unified_cache = None
         try:
-            from ..caching.cache_manager import UnifiedCacheManager
+            from ...shared.caching.cache_manager import UnifiedCacheManager
             unified_cache = UnifiedCacheManager.get_instance()
         except Exception as e:
             logger.debug(f"统一缓存管理器不可用: {e}")
@@ -606,7 +620,7 @@ class TextVectorizer:
         # 尝试使用统一缓存管理器
         unified_cache = None
         try:
-            from ..caching.cache_manager import UnifiedCacheManager
+            from ...shared.caching.cache_manager import UnifiedCacheManager
             unified_cache = UnifiedCacheManager.get_instance()
         except Exception as e:
             logger.debug(f"统一缓存管理器不可用: {e}")
@@ -633,7 +647,7 @@ class TextVectorizer:
         # 尝试使用统一缓存管理器
         unified_cache = None
         try:
-            from ..caching.cache_manager import UnifiedCacheManager
+            from ...shared.caching.cache_manager import UnifiedCacheManager
             unified_cache = UnifiedCacheManager.get_instance()
         except Exception as e:
             logger.debug(f"统一缓存管理器不可用: {e}")

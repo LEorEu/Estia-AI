@@ -12,7 +12,7 @@ import asyncio
 import logging
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
-from ...internal import handle_memory_errors, ErrorHandlerMixin
+from ...shared.internal import handle_memory_errors, ErrorHandlerMixin
 
 logger = logging.getLogger(__name__)
 

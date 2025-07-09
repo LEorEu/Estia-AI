@@ -12,7 +12,7 @@ import logging
 from typing import Dict, Any, List, Optional
 
 # 🔥 使用统一的内部工具
-from .internal import MemoryLayer, handle_memory_errors, ErrorHandlerMixin, QueryBuilder
+from ...shared.internal import MemoryLayer, handle_memory_errors, ErrorHandlerMixin, QueryBuilder
 
 logger = logging.getLogger(__name__)
 

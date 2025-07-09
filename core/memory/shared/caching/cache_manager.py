@@ -13,6 +13,7 @@ import threading
 from typing import Dict, List, Any, Optional, Set, TypeVar, Generic, Type, Union, Tuple, cast
 from pathlib import Path
 
+from .keyword_cache import KeywordCache
 from .cache_interface import (
     CacheInterface, CacheEvent, CacheEventType, CacheListener, CacheLevel
 )
@@ -36,6 +37,8 @@ class CacheManagerStats:
     """缓存管理器统计信息类"""
     
     def __init__(self):
+        # 关键词缓存集成
+        self.keyword_cache = KeywordCache()
         """初始化统计信息"""
         # 计数器
         self.total_hits = 0
@@ -103,6 +106,43 @@ class CacheManagerStats:
         self.__init__()
 
 
+
+    def clear(self, cache_id: Optional[str] = None):
+        """
+        清理缓存
+        
+        Args:
+            cache_id: 指定缓存ID，None表示清理所有
+        """
+        with self._lock:
+            if cache_id:
+                # 清理指定缓存
+                if cache_id in self.caches:
+                    cache = self.caches[cache_id]
+                    cache.clear()
+                    self._emit_event(CacheEventType.CLEAR, cache_id, None, None)
+            else:
+                # 清理所有缓存
+                for cache in self.caches.values():
+                    cache.clear()
+                
+                # 清理关键词缓存
+                if hasattr(self, 'keyword_cache'):
+                    self.keyword_cache.clear_keyword_cache()
+                
+                # 清理键映射
+                if hasattr(self, 'key_cache_map'):
+                    self.key_cache_map.clear()
+                
+                # 重置统计
+                self.stats['total_hits'] = 0
+                self.stats['total_misses'] = 0
+                for cache_id in self.stats['cache_hits']:
+                    self.stats['cache_hits'][cache_id] = 0
+                
+                self._emit_event(CacheEventType.CLEAR, "all", None, None)
+
+
 class UnifiedCacheManager(CacheListener, Generic[K, V, M]):
     """
     统一缓存管理器
@@ -125,6 +165,8 @@ class UnifiedCacheManager(CacheListener, Generic[K, V, M]):
         return cls._instance
     
     def __init__(self):
+        # 关键词缓存集成
+        self.keyword_cache = KeywordCache()
         """初始化缓存管理器"""
         # 缓存注册表
         self.caches: Dict[str, CacheInterface] = {}
@@ -615,33 +657,41 @@ class UnifiedCacheManager(CacheListener, Generic[K, V, M]):
             logger.error(f"获取缓存记忆失败: {e}")
             return []
     
+    
     def search_by_content(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
         """
-        基于内容搜索缓存记忆
-        
-        参数:
-            query: 搜索查询
-            limit: 限制数量
-            
-        返回:
-            记忆列表
+        基于内容搜索缓存
+        使用关键词缓存加速搜索
         """
         try:
-            results = []
-            
-            # 尝试委托给具有搜索能力的缓存
-            for cache in self.caches.values():
-                if hasattr(cache, 'search_by_content'):
-                    try:
-                        search_results = cache.search_by_content(query, limit)
-                        if search_results:
-                            results.extend(search_results)
-                            logger.debug(f"从 {cache.cache_id} 搜索到: {len(search_results)} 条")
-                            break
-                    except Exception as e:
-                        logger.debug(f"从 {cache.cache_id} 搜索失败: {e}")
-            
-            return results[:limit]
+            with self._lock:
+                self.stats['operations']['keyword_search'] = (
+                    self.stats['operations'].get('keyword_search', 0) + 1
+                )
+                
+                # 1. 关键词搜索
+                if hasattr(self, 'keyword_cache'):
+                    cache_keys = self.keyword_cache.search_by_keywords(query, limit * 2)
+                    
+                    if cache_keys:
+                        # 2. 获取缓存内容
+                        results = []
+                        for cache_key in cache_keys:
+                            # 尝试从各个缓存中获取
+                            for cache in self.caches.values():
+                                value = cache.get(cache_key)
+                                if value is not None:
+                                    results.append({
+                                        'key': cache_key,
+                                        'value': value,
+                                        'cache_id': cache.cache_id
+                                    })
+                                    break
+                        
+                        return results[:limit]
+                
+                # 3. 回退到基础搜索
+                return []
             
         except Exception as e:
             logger.error(f"内容搜索失败: {e}")
@@ -728,3 +778,10 @@ class UnifiedCacheManager(CacheListener, Generic[K, V, M]):
                         
         except Exception as e:
             logger.error(f"清除记忆缓存失败: {e}") 
+    def clear(self):
+        """
+        清空所有缓存（clear_all的别名方法）
+        
+        为了保持API一致性，提供clear方法作为clear_all的别名
+        """
+        return self.clear_all()

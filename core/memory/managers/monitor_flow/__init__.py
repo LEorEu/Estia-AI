@@ -10,7 +10,7 @@
 import time
 import logging
 from typing import Dict, Any, List, Optional
-from ...internal import handle_memory_errors, ErrorHandlerMixin
+from ...shared.internal import handle_memory_errors, ErrorHandlerMixin
 
 logger = logging.getLogger(__name__)
 

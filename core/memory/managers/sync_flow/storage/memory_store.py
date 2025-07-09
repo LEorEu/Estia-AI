@@ -13,11 +13,11 @@ from typing import List, Dict, Any, Optional, Union, Tuple
 from datetime import datetime
 from pathlib import Path
 
-# 导入记忆系统组件
+# 导入记忆系统组件（参考旧系统的简洁方式）
 try:
-    from core.memory.init import DatabaseManager, VectorIndexManager
-    from core.memory.embedding import TextVectorizer, EmbeddingCache
-    from core.utils.logger import get_logger
+    from ..init import DatabaseManager, VectorIndexManager
+    from ....shared.embedding import TextVectorizer, EmbeddingCache
+    from ....utils.logger import get_logger
     logger = get_logger("estia.memory.storage")
 except ImportError:
     # 如果还没有日志工具，使用标准日志
@@ -26,14 +26,14 @@ except ImportError:
     
     # 尝试导入必要组件
     try:
-        from core.memory.init import DatabaseManager, VectorIndexManager
+        from ..init import DatabaseManager, VectorIndexManager
     except ImportError:
         logger.error("无法导入DatabaseManager或VectorIndexManager")
         DatabaseManager = None
         VectorIndexManager = None
     
     try:
-        from core.memory.embedding import TextVectorizer, EmbeddingCache
+        from ....shared.embedding import TextVectorizer, EmbeddingCache
     except ImportError:
         logger.error("无法导入TextVectorizer或EmbeddingCache")
         TextVectorizer = None
@@ -423,6 +423,11 @@ class MemoryStore:
             np.ndarray: 向量表示
         """
         try:
+            # 检查向量化器是否可用
+            if self.vectorizer is None:
+                logger.error("向量化器未初始化")
+                return None
+                
             # 使用向量化器将文本转换为向量
             vector = self.vectorizer.encode(text)
             return vector
