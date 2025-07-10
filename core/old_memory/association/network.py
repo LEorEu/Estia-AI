@@ -701,6 +701,43 @@ class AssociationNetwork:
                 logger.warning(f"⚠️ 关联删除失败或不存在: {source_id} <-> {target_id}")
                 return False
                 
+        
+    def find_associated_memories(self, memory_ids: List[str], depth: int = 2, 
+                               max_results: int = 10, min_strength: float = 0.3) -> List[str]:
+        """
+        查找关联记忆 - 为兼容同步流程管理器的调用
+        
+        参数:
+            memory_ids: 记忆ID列表
+            depth: 检索深度
+            max_results: 最大结果数
+            min_strength: 最小关联强度
+            
+        返回:
+            List[str]: 关联记忆ID列表
+        """
+        try:
+            if not memory_ids:
+                return []
+            
+            # 获取第一个记忆的关联
+            primary_memory_id = memory_ids[0]
+            related_memories = self.get_related_memories(primary_memory_id, depth, min_strength)
+            
+            # 提取记忆ID
+            related_ids = []
+            for memory in related_memories:
+                memory_id = memory.get('memory_id')
+                if memory_id and memory_id not in memory_ids:  # 避免重复
+                    related_ids.append(memory_id)
+            
+            # 限制结果数量
+            return related_ids[:max_results]
+            
         except Exception as e:
+            logger.error(f"查找关联记忆失败: {e}")
+            return []
+
+    except Exception as e:
             logger.error(f"删除关联失败: {e}")
             return False

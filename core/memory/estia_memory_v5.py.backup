@@ -163,26 +163,6 @@ class EstiaMemorySystem:
                     components['faiss_retriever'] = faiss_retriever
                     self.logger.info("✅ 高级检索组件初始化成功")
                     
-                    # === 文档标准的核心组件初始化 ===
-                    
-                    # 关联网络 (Step 6 核心组件)
-                    from ..old_memory.association.network import AssociationNetwork
-                    association_network = AssociationNetwork(db_manager)
-                    components['association_network'] = association_network
-                    self.logger.info("✅ 关联网络初始化成功 (文档Step 6)")
-                    
-                    # 历史检索器 (Step 7 核心组件)
-                    from .managers.sync_flow.context.history import HistoryRetriever
-                    history_retriever = HistoryRetriever(db_manager)
-                    components['history_retriever'] = history_retriever
-                    self.logger.info("✅ 历史检索器初始化成功 (文档Step 7)")
-                    
-                    # 记忆评分器 (Step 8 核心组件)
-                    from .managers.sync_flow.ranking.scorer import MemoryScorer
-                    scorer = MemoryScorer()
-                    components['scorer'] = scorer
-                    self.logger.info("✅ 记忆评分器初始化成功 (文档Step 8)")
-                    
                 except Exception as e:
                     self.logger.warning(f"高级组件初始化失败: {e}")
             
