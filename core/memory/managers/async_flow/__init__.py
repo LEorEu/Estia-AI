@@ -8,6 +8,7 @@
 """
 
 import asyncio
+import time
 import logging
 from typing import Dict, Any, Optional, List
 from ...shared.internal import handle_memory_errors, ErrorHandlerMixin
@@ -50,6 +51,23 @@ class AsyncFlowManager(ErrorHandlerMixin):
             
             # 初始化权重管理器
             self.weight_manager = WeightManager(self.db_manager)
+            
+            # 🔥 启动异步评估器
+            try:
+                import asyncio
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # 如果事件循环已经运行，直接启动
+                    asyncio.create_task(self.async_evaluator.start())
+                else:
+                    # 如果事件循环还没运行，标记为需要启动
+                    self._need_start_evaluator = True
+            except RuntimeError:
+                # 没有事件循环，标记为需要启动
+                self._need_start_evaluator = True
+                
+        else:
+            self._need_start_evaluator = False
         
         # 传统组件（保持兼容性）
         self.layer_manager = components.get('layer_manager')
@@ -64,6 +82,12 @@ class AsyncFlowManager(ErrorHandlerMixin):
         self.is_running = True
         self.logger.info("🔄 启动异步流程管理器")
         
+        # 🔥 启动异步评估器（如果还没启动）
+        if self.async_evaluator and getattr(self, '_need_start_evaluator', False):
+            await self.async_evaluator.start()
+            self._need_start_evaluator = False
+            self.logger.info("✅ 异步评估器已启动")
+        
         # 启动异步处理任务
         asyncio.create_task(self._process_evaluation_queue())
     
@@ -71,6 +95,11 @@ class AsyncFlowManager(ErrorHandlerMixin):
         """停止异步处理"""
         self.is_running = False
         self.logger.info("⏹️ 停止异步流程管理器")
+        
+        # 🔥 停止异步评估器
+        if self.async_evaluator:
+            await self.async_evaluator.stop()
+            self.logger.info("✅ 异步评估器已停止")
     
     @handle_memory_errors("异步流程触发失败")
     async def trigger_async_evaluation(self, user_input: str, ai_response: str, 
@@ -141,32 +170,43 @@ class AsyncFlowManager(ErrorHandlerMixin):
             return {'weight': 1.0, 'emotion': 'neutral', 'topic': 'general'}
         
         try:
-            # 🔥 使用正确的异步评估器接口
-            await self.async_evaluator.queue_dialogue_for_evaluation(
-                user_input=task['user_input'],
-                ai_response=task['ai_response'],
-                session_id=task.get('context', {}).get('session_id'),
-                context_memories=task.get('context', {}).get('context_memories', [])
-            )
+            # 🔥 使用异步评估器的完整评估功能
+            dialogue_data = {
+                'user_input': task['user_input'],
+                'ai_response': task['ai_response'],
+                'session_id': task.get('context', {}).get('session_id'),
+                'context_memories': task.get('context', {}).get('context_memories', []),
+                'timestamp': task.get('timestamp', time.time())
+            }
             
-            # 简化版直接返回基础评估
-            # TODO: 完整的LLM评估需要启动评估器工作线程
+            # 直接调用内部评估方法
+            evaluation_result = await self.async_evaluator._evaluate_dialogue(dialogue_data)
+            
+            if evaluation_result:
+                self.logger.debug(f"💭 LLM评估完成: 权重={evaluation_result.get('weight', 1.0)}")
+                return evaluation_result
+            else:
+                # 如果LLM评估失败，使用估算方法
+                estimated_weight = self._estimate_dialogue_weight(task)
+                result = {
+                    'weight': estimated_weight,
+                    'emotion': 'neutral',
+                    'topic': 'general',
+                    'super_group': 'dialogue'
+                }
+                self.logger.debug(f"💭 使用估算权重: {estimated_weight}")
+                return result
+            
+        except Exception as e:
+            self.logger.error(f"LLM评估失败: {e}")
+            # 回退到估算方法
             estimated_weight = self._estimate_dialogue_weight(task)
-            
-            result = {
+            return {
                 'weight': estimated_weight,
                 'emotion': 'neutral',
                 'topic': 'general',
                 'super_group': 'dialogue'
             }
-            
-            self.logger.debug(f"💭 LLM评估完成: 权重={result.get('weight', 1.0)}")
-            
-            return result
-            
-        except Exception as e:
-            self.logger.error(f"LLM评估失败: {e}")
-            return {'weight': 1.0, 'emotion': 'neutral', 'topic': 'general'}
     
     async def _update_memory_weights(self, task: Dict[str, Any], evaluation: Dict[str, Any]):
         """
@@ -305,17 +345,35 @@ class AsyncFlowManager(ErrorHandlerMixin):
                 
                 # 建立用户输入和AI回复之间的关联
                 if memory_ids.get('user_memory_id') and memory_ids.get('ai_memory_id'):
-                    await self.association_network.create_association_async(
+                    # 使用同步方法，因为旧系统的关联网络是同步的
+                    self.association_network.create_association(
                         memory_ids['user_memory_id'],
                         memory_ids['ai_memory_id'],
-                        'dialogue_pair',
                         strength=0.9
                     )
                 
-                # 建立主题关联
-                await self.association_network.establish_topic_associations(
-                    list(memory_ids.values()), topic
-                )
+                # 建立主题关联（基于同样的内容创建关联）
+                user_memory_id = memory_ids.get('user_memory_id')
+                ai_memory_id = memory_ids.get('ai_memory_id')
+                
+                if user_memory_id and ai_memory_id:
+                    # 获取记忆内容，用于自动关联
+                    memory_content = {
+                        'user_input': task['user_input'],
+                        'ai_response': task['ai_response'],
+                        'topic': topic,
+                        'emotion': evaluation.get('emotion', 'neutral')
+                    }
+                    
+                    # 为用户记忆创建自动关联
+                    self.association_network.auto_create_associations(
+                        user_memory_id, memory_content, max_associations=5
+                    )
+                    
+                    # 为AI记忆创建自动关联
+                    self.association_network.auto_create_associations(
+                        ai_memory_id, memory_content, max_associations=5
+                    )
                 
                 self.logger.debug("🕸️ 关联建立完成")
                 

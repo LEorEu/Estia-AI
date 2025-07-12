@@ -120,7 +120,7 @@ class TextVectorizer:
             self.cache_dir = cache_dir
         
         # 模型缓存使用项目根目录的cache（避免网络下载）
-        self.model_cache_dir = str(Path(__file__).parent.parent.parent.parent / "cache")
+        self.model_cache_dir = str(Path(__file__).parent.parent.parent.parent.parent / "cache")
         
         # 初始化模型
         self.model = None
@@ -196,10 +196,6 @@ class TextVectorizer:
             os.environ['SENTENCE_TRANSFORMERS_HOME'] = self.model_cache_dir
             os.environ['HF_HOME'] = self.model_cache_dir
             
-            # 优先使用离线模式，避免网络问题
-            os.environ['HF_HUB_OFFLINE'] = '1'
-            os.environ['TRANSFORMERS_OFFLINE'] = '1'
-            
             logger.info(f"🔧 使用项目模型缓存目录: {self.model_cache_dir}")
             
             # 检查model_name是否有效
@@ -214,35 +210,72 @@ class TextVectorizer:
             
             logger.info(f"🔄 加载模型: {self.model_name}")
             
-            try:
-                # 尝试从项目缓存加载（参考旧系统的简洁方式）
-                self.model = SentenceTransformer(
-                    self.model_name,
-                    device=self.device,
-                    cache_folder=self.model_cache_dir
-                )
-                logger.info(f"✅ 从项目缓存加载成功: {self.model_name}")
+            # 🔥 首先检查本地模型是否存在
+            expected_model_path = os.path.join(self.model_cache_dir, f"models--{self.model_name.replace('/', '--')}")
+            
+            if os.path.exists(expected_model_path):
+                logger.info(f"🎯 发现本地模型: {expected_model_path}")
+                # 设置为离线模式，强制使用本地模型
+                os.environ['HF_HUB_OFFLINE'] = '1'
+                os.environ['TRANSFORMERS_OFFLINE'] = '1'
                 
-            except Exception as offline_error:
-                logger.warning(f"项目缓存加载失败: {offline_error}")
+                try:
+                    self.model = SentenceTransformer(
+                        self.model_name,
+                        device=self.device,
+                        cache_folder=self.model_cache_dir,
+                        trust_remote_code=True
+                    )
+                    logger.info(f"✅ 成功加载本地模型: {self.model_name}")
+                    
+                except Exception as local_error:
+                    logger.warning(f"本地模型加载失败: {local_error}")
+                    # 清除离线设置，尝试在线加载
+                    if 'HF_HUB_OFFLINE' in os.environ:
+                        del os.environ['HF_HUB_OFFLINE']
+                    if 'TRANSFORMERS_OFFLINE' in os.environ:
+                        del os.environ['TRANSFORMERS_OFFLINE']
+                    raise local_error
+            else:
+                logger.warning(f"本地模型不存在: {expected_model_path}")
                 logger.info("🌐 尝试在线模式...")
                 
-                # 清除离线设置，允许联网下载（参考旧系统）
-                if 'HF_HUB_OFFLINE' in os.environ:
-                    del os.environ['HF_HUB_OFFLINE']
-                if 'TRANSFORMERS_OFFLINE' in os.environ:
-                    del os.environ['TRANSFORMERS_OFFLINE']
+                # 尝试多个镜像站和模型名称
+                model_options = [
+                    # 原始模型名称 + 镜像站
+                    (self.model_name, 'https://hf-mirror.com'),
+                    # 备用模型名称 + 镜像站
+                    ('sentence-transformers/all-MiniLM-L6-v2', 'https://hf-mirror.com'),
+                    # 原始模型名称 + 官方站点
+                    (self.model_name, 'https://huggingface.co'),
+                    # 备用模型名称 + 官方站点
+                    ('sentence-transformers/all-MiniLM-L6-v2', 'https://huggingface.co'),
+                ]
                 
-                # 设置镜像站
-                os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
+                model_loaded = False
+                for model_name, endpoint in model_options:
+                    try:
+                        logger.info(f"🔄 尝试加载 {model_name} 从 {endpoint}")
+                        os.environ['HF_ENDPOINT'] = endpoint
+                        
+                        self.model = SentenceTransformer(
+                            model_name,
+                            device=self.device,
+                            cache_folder=self.model_cache_dir,
+                            trust_remote_code=True
+                        )
+                        self.model_name = model_name  # 更新成功的模型名称
+                        logger.info(f"✅ 在线模式加载成功: {model_name}")
+                        model_loaded = True
+                        break
+                        
+                    except Exception as online_error:
+                        logger.warning(f"尝试 {model_name} 失败: {online_error}")
+                        continue
                 
-                # 重新尝试加载
-                self.model = SentenceTransformer(
-                    self.model_name,
-                    device=self.device,
-                    cache_folder=self.model_cache_dir
-                )
-                logger.info(f"✅ 在线模式加载成功: {self.model_name}")
+                if not model_loaded:
+                    logger.error("所有在线模型加载尝试都失败了")
+                    raise RuntimeError("无法加载任何 sentence-transformers 模型")
             
             # 获取向量维度
             self.vector_dim = self.model.get_sentence_embedding_dimension()

@@ -72,7 +72,7 @@ def safe_db_execute(db_manager: "DatabaseManager", query: str, params=None,
 # 主要组件导入
 try:
     from .estia_memory import EstiaMemorySystem, create_estia_memory
-    from .storage.memory_store import MemoryStore
+    from ..memory.managers.sync_flow.storage.memory_store import MemoryStore
     from .init.db_manager import DatabaseManager
     
     # 子模块快捷导入

@@ -20,7 +20,7 @@ class SimpleVectorizer:
     不依赖外部模型，使用哈希+随机向量生成
     """
     
-    def __init__(self, dimension: int = 384, use_cache: bool = True):
+    def __init__(self, dimension: int = 1024, use_cache: bool = True):
         """
         初始化简化向量化器
         

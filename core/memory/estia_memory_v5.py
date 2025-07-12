@@ -126,7 +126,7 @@ class EstiaMemorySystem:
                 
                 # 回退到简化版本
                 vectorizer = SimpleVectorizer(
-                    dimension=384,
+                    dimension=1024,  # 🔥 修复：使用1024维度与Qwen模型保持一致
                     use_cache=True
                 )
                 vector_dim = vectorizer.vector_dim
@@ -147,6 +147,10 @@ class EstiaMemorySystem:
             # 🔥 可选高级组件
             if self.enable_advanced and components.get('db_manager'):
                 try:
+                    # 确保UnifiedCacheManager可用
+                    unified_cache = components.get('unified_cache')
+                    if not unified_cache:
+                        unified_cache = UnifiedCacheManager.get_instance()
                     # 智能检索器
                     from .managers.sync_flow.retrieval.smart_retriever import SmartRetriever
                     smart_retriever = SmartRetriever(db_manager)
@@ -185,6 +189,11 @@ class EstiaMemorySystem:
                     
                 except Exception as e:
                     self.logger.warning(f"高级组件初始化失败: {e}")
+                    # 确保UnifiedCacheManager在异常处理中可用
+                    try:
+                        from .shared.caching.cache_manager import UnifiedCacheManager
+                    except:
+                        pass
             
         except Exception as e:
             self.logger.error(f"组件初始化失败: {e}")

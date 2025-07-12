@@ -701,6 +701,9 @@ class AssociationNetwork:
                 logger.warning(f"⚠️ 关联删除失败或不存在: {source_id} <-> {target_id}")
                 return False
                 
+        except Exception as e:
+            logger.error(f"删除关联失败: {e}")
+            return False
         
     def find_associated_memories(self, memory_ids: List[str], depth: int = 2, 
                                max_results: int = 10, min_strength: float = 0.3) -> List[str]:
@@ -737,7 +740,3 @@ class AssociationNetwork:
         except Exception as e:
             logger.error(f"查找关联记忆失败: {e}")
             return []
-
-    except Exception as e:
-            logger.error(f"删除关联失败: {e}")
-            return False

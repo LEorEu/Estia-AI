@@ -4,6 +4,6 @@
 记忆存储模块 - 负责记忆的存储、检索和管理
 """
 
-from core.memory.storage.memory_store import MemoryStore
+from ...memory.managers.sync_flow.storage.memory_store import MemoryStore
 
 __all__ = ['MemoryStore']

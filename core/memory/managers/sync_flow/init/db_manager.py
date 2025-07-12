@@ -134,9 +134,18 @@ class DatabaseManager:
                     group_id TEXT,
                     summary TEXT,
                     last_accessed REAL NOT NULL,
-                    metadata TEXT
+                    metadata TEXT,
+                    archived INTEGER DEFAULT 0
                 )
             ''')
+            
+            # 检查并添加archived字段（兼容旧数据库）
+            try:
+                self.cursor.execute("ALTER TABLE memories ADD COLUMN archived INTEGER DEFAULT 0")
+                logger.info("为memories表添加archived字段")
+            except sqlite3.OperationalError:
+                # 字段已经存在，忽略错误
+                pass
             
             # 创建索引
             self.cursor.execute('CREATE INDEX IF NOT EXISTS idx_memories_session ON memories(session_id)')
@@ -615,6 +624,16 @@ class DatabaseManager:
             if self.conn:
                 self.conn.rollback()
             return False
+    
+    def get_affected_rows(self):
+        """获取上次操作影响的行数"""
+        try:
+            if self.cursor:
+                return self.cursor.rowcount
+            return 0
+        except Exception as e:
+            logger.error(f"获取影响行数失败: {e}")
+            return 0
 
 # 模块测试代码
 if __name__ == "__main__":

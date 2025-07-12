@@ -31,13 +31,13 @@ class MemoryFlowMonitor(ErrorHandlerMixin):
         self.async_flow_manager = components.get('async_flow_manager')
         
         # 导入原system_stats功能
-        from ...monitoring.system_stats import SystemStatsManager
+        from .system_stats import SystemStatsManager
         self.system_stats = SystemStatsManager(self.db_manager, self.unified_cache)
         
         # 导入monitoring模块功能
         try:
-            from ...monitoring.pipeline_monitor import PipelineMonitor
-            from ...monitoring.analytics import PerformanceAnalyzer
+            from .monitoring.pipeline_monitor import PipelineMonitor
+            from .monitoring.analytics import PerformanceAnalyzer
             
             self.pipeline_monitor = PipelineMonitor()
             self.performance_analyzer = PerformanceAnalyzer()
@@ -227,6 +227,106 @@ class MemoryFlowMonitor(ErrorHandlerMixin):
         else:
             return 'D'
     
+    def start_monitoring(self, operation_name: str) -> str:
+        """
+        开始监控操作
+        
+        Args:
+            operation_name: 操作名称
+            
+        Returns:
+            str: 监控ID
+        """
+        try:
+            monitor_id = f"{operation_name}_{int(time.time() * 1000)}"
+            start_time = time.time()
+            
+            # 存储监控会话
+            if not hasattr(self, '_active_monitors'):
+                self._active_monitors = {}
+            
+            self._active_monitors[monitor_id] = {
+                'operation': operation_name,
+                'start_time': start_time,
+                'status': 'active'
+            }
+            
+            self.logger.debug(f"📊 开始监控: {operation_name} (ID: {monitor_id})")
+            return monitor_id
+            
+        except Exception as e:
+            self.logger.error(f"开始监控失败: {e}")
+            return f"error_{int(time.time())}"
+    
+    def end_monitoring(self, operation_name: str, monitor_id: str = None) -> Dict[str, Any]:
+        """
+        结束监控操作
+        
+        Args:
+            operation_name: 操作名称
+            monitor_id: 监控ID，如果不提供则查找最近的
+            
+        Returns:
+            Dict: 监控结果
+        """
+        try:
+            end_time = time.time()
+            
+            if not hasattr(self, '_active_monitors'):
+                self._active_monitors = {}
+            
+            # 查找对应的监控会话
+            target_monitor = None
+            target_id = None
+            
+            if monitor_id and monitor_id in self._active_monitors:
+                target_monitor = self._active_monitors[monitor_id]
+                target_id = monitor_id
+            else:
+                # 查找最近的同名操作
+                for mid, monitor in self._active_monitors.items():
+                    if monitor['operation'] == operation_name and monitor['status'] == 'active':
+                        target_monitor = monitor
+                        target_id = mid
+                        break
+            
+            if target_monitor:
+                # 计算执行时间
+                execution_time = end_time - target_monitor['start_time']
+                
+                # 更新监控状态
+                target_monitor['end_time'] = end_time
+                target_monitor['execution_time'] = execution_time
+                target_monitor['status'] = 'completed'
+                
+                # 记录监控结果
+                self.monitor_flow_execution(
+                    flow_type='sync',
+                    operation=operation_name,
+                    start_time=target_monitor['start_time'],
+                    end_time=end_time,
+                    success=True
+                )
+                
+                # 清理监控会话
+                del self._active_monitors[target_id]
+                
+                result = {
+                    'operation': operation_name,
+                    'execution_time_ms': round(execution_time * 1000, 2),
+                    'status': 'success'
+                }
+                
+                self.logger.debug(f"📊 结束监控: {operation_name} ({result['execution_time_ms']}ms)")
+                return result
+            else:
+                self.logger.warning(f"未找到对应的监控会话: {operation_name}")
+                return {'operation': operation_name, 'status': 'not_found'}
+                
+        except Exception as e:
+            self.logger.error(f"结束监控失败: {e}")
+            return {'operation': operation_name, 'status': 'error', 'error': str(e)}
+
     def get_real_time_metrics(self) -> Dict[str, Any]:
         """获取实时性能指标"""
         try:

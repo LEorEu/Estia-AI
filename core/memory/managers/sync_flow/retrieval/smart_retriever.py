@@ -36,18 +36,29 @@ class SmartRetriever:
             # 🆕 注册数据库缓存到统一缓存管理器
             try:
                 from ...shared.caching.cache_adapters import DbCacheAdapter, SmartRetrieverCacheAdapter
-                from ...shared.caching.cache_manager import UnifiedCacheManager
                 
-                # 注册数据库缓存适配器
-                db_adapter = DbCacheAdapter(self.cache_manager)
-                UnifiedCacheManager.get_instance().register_cache(db_adapter)
-                self.logger.info("✅ 数据库缓存已接入统一缓存管理器")
+                # 延迟导入，避免循环依赖
+                def register_cache_adapters():
+                    try:
+                        from ...shared.caching.cache_manager import UnifiedCacheManager
+                        
+                        # 注册数据库缓存适配器
+                        db_adapter = DbCacheAdapter(self.cache_manager)
+                        UnifiedCacheManager.get_instance().register_cache(db_adapter)
+                        self.logger.info("✅ 数据库缓存已接入统一缓存管理器")
+                        
+                        # 注册SmartRetriever缓存适配器
+                        retriever_adapter = SmartRetrieverCacheAdapter(self)
+                        UnifiedCacheManager.get_instance().register_cache(retriever_adapter)
+                        self.logger.info("✅ SmartRetriever缓存已接入统一缓存管理器")
+                        
+                    except Exception as cache_reg_error:
+                        self.logger.debug(f"统一缓存管理器注册失败: {cache_reg_error}")
                 
-                # 注册SmartRetriever缓存适配器
-                retriever_adapter = SmartRetrieverCacheAdapter(self)
-                UnifiedCacheManager.get_instance().register_cache(retriever_adapter)
-                self.logger.info("✅ SmartRetriever缓存已接入统一缓存管理器")
+                register_cache_adapters()
                 
+            except ImportError as import_error:
+                self.logger.debug(f"缓存适配器导入失败: {import_error}")
             except Exception as adapt_exc:
                 self.logger.debug(f"缓存适配器注册失败: {adapt_exc}")
         except Exception as e:
@@ -68,8 +79,15 @@ class SmartRetriever:
             # 🆕 0. 优先从统一缓存获取热缓存记忆
             unified_cache = None
             try:
-                from ...shared.caching.cache_manager import UnifiedCacheManager
-                unified_cache = UnifiedCacheManager.get_instance()
+                # 延迟导入避免循环依赖
+                def get_unified_cache():
+                    try:
+                        from ...shared.caching.cache_manager import UnifiedCacheManager
+                        return UnifiedCacheManager.get_instance()
+                    except Exception:
+                        return None
+                
+                unified_cache = get_unified_cache()
             except Exception as e:
                 self.logger.debug(f"统一缓存管理器不可用: {e}")
             

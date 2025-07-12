@@ -218,7 +218,11 @@ class ErrorRecoveryManager:
         return default_value
     
     def with_recovery(self, component: str, fallback_value: Any = None):
-        """错误恢复装饰器"""
+        """错误恢复上下文管理器"""
+        return ErrorRecoveryContext(self, component, fallback_value)
+    
+    def as_decorator(self, component: str, fallback_value: Any = None):
+        """错误恢复装饰器（保持向后兼容）"""
         def decorator(func):
             @wraps(func)
             async def async_wrapper(*args, **kwargs):
@@ -369,3 +373,37 @@ def get_error_recovery_manager() -> ErrorRecoveryManager:
 def with_error_recovery(component: str, fallback_value: Any = None):
     """错误恢复装饰器的快捷方式"""
     return get_error_recovery_manager().with_recovery(component, fallback_value)
+
+
+class ErrorRecoveryContext:
+    """错误恢复上下文管理器"""
+    
+    def __init__(self, recovery_manager: ErrorRecoveryManager, component: str, fallback_value: Any = None):
+        self.recovery_manager = recovery_manager
+        self.component = component
+        self.fallback_value = fallback_value
+        self.error_occurred = False
+        
+    def __enter__(self):
+        """进入上下文"""
+        # 检查断路器状态
+        if self.recovery_manager.is_circuit_open(self.component):
+            logger.warning(f"🔴 断路器已打开，将返回降级结果: {self.component}")
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """退出上下文"""
+        if exc_type is not None:
+            # 发生了异常
+            self.error_occurred = True
+            severity = ErrorSeverity.HIGH if isinstance(exc_val, (SystemError, MemoryError)) else ErrorSeverity.MEDIUM
+            self.recovery_manager.record_error(self.component, exc_val, severity)
+            
+            # 不抑制异常，让调用者处理
+            return False
+        
+        # 成功执行，重置断路器（如果需要）
+        if self.recovery_manager.circuit_breakers.get(self.component, {}).get('state') == 'half-open':
+            self.recovery_manager.reset_circuit_breaker(self.component)
+        
+        return False  # 不抑制任何异常
