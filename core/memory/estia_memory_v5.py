@@ -170,7 +170,7 @@ class EstiaMemorySystem:
                     # === 文档标准的核心组件初始化 ===
                     
                     # 关联网络 (Step 6 核心组件)
-                    from ..old_memory.association.network import AssociationNetwork
+                    from .managers.async_flow.association.network import AssociationNetwork
                     association_network = AssociationNetwork(db_manager)
                     components['association_network'] = association_network
                     self.logger.info("✅ 关联网络初始化成功 (文档Step 6)")
@@ -257,15 +257,37 @@ class EstiaMemorySystem:
             # 🔥 触发异步评估（如果可用）
             if self.async_flow_manager:
                 try:
-                    import asyncio
-                    asyncio.create_task(
-                        self.async_flow_manager.trigger_async_evaluation(
-                            user_input, ai_response, sync_result, context
+                    # 检查是否有运行的事件循环
+                    try:
+                        import asyncio
+                        loop = asyncio.get_running_loop()
+                        # 如果有事件循环，创建任务
+                        asyncio.create_task(
+                            self.async_flow_manager.trigger_async_evaluation(
+                                user_input, ai_response, sync_result, context
+                            )
                         )
-                    )
-                except RuntimeError:
-                    # 没有事件循环，跳过异步评估
-                    self.logger.debug("没有事件循环，跳过异步评估")
+                    except RuntimeError:
+                        # 没有运行的事件循环，使用线程池执行
+                        import threading
+                        
+                        def run_async_evaluation():
+                            try:
+                                asyncio.run(
+                                    self.async_flow_manager.trigger_async_evaluation(
+                                        user_input, ai_response, sync_result, context
+                                    )
+                                )
+                            except Exception as e:
+                                self.logger.warning(f"异步评估执行失败: {e}")
+                        
+                        # 在后台线程中运行
+                        thread = threading.Thread(target=run_async_evaluation, daemon=True)
+                        thread.start()
+                        
+                except Exception as async_error:
+                    self.logger.warning(f"异步评估触发失败: {async_error}")
+                    # 异步评估失败不影响主流程
             
             return sync_result
             

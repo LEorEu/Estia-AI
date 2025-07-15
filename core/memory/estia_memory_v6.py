@@ -202,7 +202,7 @@ class EstiaMemorySystem:
                 components['faiss_retriever'] = faiss_retriever
                 
                 # 关联网络（来自旧系统）
-                from ..old_memory.association.network import AssociationNetwork
+                from .managers.async_flow.association.network import AssociationNetwork
                 association_network = AssociationNetwork(db_manager)
                 components['association_network'] = association_network
                 
@@ -217,7 +217,7 @@ class EstiaMemorySystem:
                 components['scorer'] = scorer
                 
                 # 🆕 上下文长度管理器（来自旧系统）
-                from ..old_memory.context.context_manager import ContextLengthManager
+                from .managers.sync_flow.context.context_manager import ContextLengthManager
                 context_manager = ContextLengthManager(preset=self.context_preset)
                 components['context_manager'] = context_manager
                 self.context_manager = context_manager

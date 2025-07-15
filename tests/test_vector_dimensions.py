@@ -10,7 +10,7 @@ import sys
 import numpy as np
 
 # 添加项目根目录到Python路径
-sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 def test_vector_dimensions():
     """测试向量维度一致性"""
