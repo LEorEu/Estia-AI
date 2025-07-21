@@ -177,6 +177,7 @@ class EstiaApp:
             raise RuntimeError("系统未初始化完成")
         
         start_time = time.time()
+        full_response = ""
         
         try:
             # 使用记忆系统增强查询
@@ -193,16 +194,23 @@ class EstiaApp:
             # 根据配置选择流式输出方式
             if settings.ENABLE_TEXT_STREAM and settings.ENABLE_AUDIO_STREAM:
                 # 文本+语音流式输出
-                yield from self._process_stream_with_audio(query, enhanced_context)
+                for chunk in self._process_stream_with_audio(query, enhanced_context):
+                    full_response += chunk
+                    yield chunk
             elif settings.ENABLE_TEXT_STREAM:
                 # 仅文本流式输出
-                yield from self._process_text_stream(query, enhanced_context)
+                for chunk in self._process_text_stream(query, enhanced_context):
+                    full_response += chunk
+                    yield chunk
             elif settings.ENABLE_AUDIO_STREAM:
                 # 仅语音流式输出
-                yield from self._process_audio_stream(query, enhanced_context)
+                for chunk in self._process_audio_stream(query, enhanced_context):
+                    full_response += chunk
+                    yield chunk
             else:
                 # 普通输出
                 response = self.dialogue_engine.generate_response(query, enhanced_context)
+                full_response = response
                 yield response
             
             response_time = time.time() - response_start
@@ -210,9 +218,6 @@ class EstiaApp:
             
             # 异步存储对话记录（不阻塞响应）
             try:
-                # 收集完整回复用于存储
-                full_response = ""
-                # 这里需要根据具体的流式输出方式收集完整回复
                 self.memory.store_interaction(query, full_response, context)
                 self.logger.debug("对话记录已加入存储队列")
             except Exception as e:
@@ -227,8 +232,10 @@ class EstiaApp:
         try:
             # 使用对话引擎的流式方法
             if self.dialogue_engine:
+                prompt = f"请基于以下信息回答用户的问题或请求。\n\n{enhanced_context}\n\n用户请求: {query}\n\n请基于上述信息给出回复:"
+                
                 response_generator = self.dialogue_engine._get_llm_response_stream(
-                    f"请基于以下信息回答用户的问题或请求。\n\n{enhanced_context}\n\n用户请求: {query}\n\n请基于上述信息给出回复:",
+                    prompt,
                     [],
                     ""
                 )
@@ -249,20 +256,27 @@ class EstiaApp:
             
             # 获取文本生成器
             if self.dialogue_engine:
+                prompt = f"请基于以下信息回答用户的问题或请求。\n\n{enhanced_context}\n\n用户请求: {query}\n\n请基于上述信息给出回复:"
+                
                 response_generator = self.dialogue_engine._get_llm_response_stream(
-                    f"请基于以下信息回答用户的问题或请求。\n\n{enhanced_context}\n\n用户请求: {query}\n\n请基于上述信息给出回复:",
+                    prompt,
                     [],
                     ""
                 )
                 
-                # 使用语音流式输出
-                import asyncio
-                asyncio.run(self._speak_stream_async(response_generator))
-                
-                # 返回完整回复（用于存储）
+                # 收集完整回复并进行语音输出
                 full_response = ""
+                response_chunks = []
+                
                 for chunk in response_generator:
                     full_response += chunk
+                    response_chunks.append(chunk)
+                
+                # 使用语音流式输出
+                import asyncio
+                asyncio.run(self._speak_stream_async(iter(response_chunks)))
+                
+                # 返回完整回复（用于存储）
                 yield full_response
             else:
                 yield "对话引擎未初始化"
@@ -278,27 +292,34 @@ class EstiaApp:
             
             # 获取文本生成器
             if self.dialogue_engine:
+                prompt = f"请基于以下信息回答用户的问题或请求。\n\n{enhanced_context}\n\n用户请求: {query}\n\n请基于上述信息给出回复:"
+                
                 response_generator = self.dialogue_engine._get_llm_response_stream(
-                    f"请基于以下信息回答用户的问题或请求。\n\n{enhanced_context}\n\n用户请求: {query}\n\n请基于上述信息给出回复:",
+                    prompt,
                     [],
                     ""
                 )
                 
-                # 同时进行文本和语音流式输出
+                # 收集所有文本块
+                response_chunks = []
+                full_response = ""
+                
+                for chunk in response_generator:
+                    response_chunks.append(chunk)
+                    full_response += chunk
+                
+                # 在后台线程中运行语音流式输出
                 import asyncio
                 import threading
                 
-                # 在后台线程中运行语音流式输出
                 def run_audio_stream():
-                    asyncio.run(self._speak_stream_async(response_generator))
+                    asyncio.run(self._speak_stream_async(iter(response_chunks)))
                 
                 audio_thread = threading.Thread(target=run_audio_stream)
                 audio_thread.start()
                 
                 # 在主线程中返回文本流
-                full_response = ""
-                for chunk in response_generator:
-                    full_response += chunk
+                for chunk in response_chunks:
                     yield chunk
                 
                 # 等待音频线程完成
@@ -497,12 +518,31 @@ class EstiaApp:
                 
                 # 处理用户查询
                 query_start = time.time()
-                response = self.process_query(user_input)
+                
+                # 根据配置选择流式或普通输出
+                if settings.ENABLE_STREAM_OUTPUT:
+                    print(f"\n🤖 Estia: ", end="", flush=True)
+                    full_response = ""
+                    
+                    try:
+                        for chunk in self.process_query_stream(user_input):
+                            print(chunk, end="", flush=True)
+                            full_response += chunk
+                    except Exception as e:
+                        print(f"流式输出失败: {e}")
+                        # 降级到普通输出
+                        response = self.process_query(user_input)
+                        print(response)
+                        full_response = response
+                else:
+                    response = self.process_query(user_input)
+                    print(f"\n🤖 Estia: {response}")
+                    full_response = response
+                
                 query_time = time.time() - query_start
                 query_count += 1
                 
-                print(f"\n🤖 Estia: {response}")
-                print(f"   ⚡ 响应时间: {query_time*1000:.2f}ms")
+                print(f"\n   ⚡ 响应时间: {query_time*1000:.2f}ms")
                 
             except KeyboardInterrupt:
                 print("\n\n👋 检测到中断信号，正在退出...")
@@ -583,4 +623,4 @@ def run_app(interaction_mode="voice", show_progress=True):
 
 if __name__ == "__main__":
     # 直接运行此文件时，启动应用
-    run_app() 
+    run_app()

@@ -8,6 +8,7 @@
 
 import logging
 from typing import Dict, List, Any, Optional
+from core.dialogue.personality import get_role_setting_for_context
 from config.settings import (
     MEMORY_CONTEXT_LIMITS, 
     MEMORY_CONTEXT_ADAPTIVE,
@@ -189,8 +190,7 @@ class ContextLengthManager:
         
         # 1. 角色设定（固定，最高优先级）
         role_limit = self.get_section_limit("role_setting")
-        role_setting = f"""[系统角色设定]
-你是Estia，一个智能、友好、具有长期记忆的AI助手。"""
+        role_setting = get_role_setting_for_context()
         
         context_parts.append(role_setting)
         current_length += len(role_setting)

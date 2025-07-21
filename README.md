@@ -123,8 +123,8 @@ core/memory/
 │       ├── error_handler.py        # 错误处理器
 │       ├── memory_layer.py         # 记忆层抽象
 │       └── query_builder.py        # 查询构建器
-├── estia_memory_v5.py              # v5.0主协调器 (生产版本)
-└── estia_memory_v6.py              # v6.0融合架构 (实验版本)
+├── estia_memory_v5.py              # v5.0主协调器 (已迁移)
+└── estia_memory_v6.py              # v6.0融合架构 (当前生产版本)
 ```
 
 ### 15步工作流程
@@ -188,7 +188,7 @@ core/memory/
 
 ```bash
 # 克隆项目
-git clone https://github.com/your-username/Estia-AI.git
+git clone https://github.com/LEorEu/Estia-AI.git
 cd Estia-AI
 
 # 运行安装脚本 (会自动创建虚拟环境并安装依赖)
@@ -351,7 +351,7 @@ __all__ = [..., 'NewManager']
 - **v3 (单体架构)**: 1720行代码集中在单个文件，难以维护
 - **v4 (轻量级协调器)**: 359行主文件，79%代码减少，engines/模块化
 - **v5 (六大模块架构)**: 真正的模块化设计，企业级质量，100%向后兼容
-- **v6 (融合架构)**: 统一管理器架构，671 QPS性能，企业生产就绪
+- **v6 (融合架构)**: 统一管理器架构，671 QPS性能，企业生产就绪，**当前稳定版本**
 
 ### 🏆 关键技术突破
 
@@ -385,7 +385,7 @@ __all__ = [..., 'NewManager']
 ```bash
 # 1. Fork项目
 # 2. 克隆到本地
-git clone https://github.com/your-username/Estia-AI.git
+git clone https://github.com/LEorEu/Estia-AI.git
 
 # 3. 创建开发分支
 git checkout -b feature/your-feature
@@ -448,12 +448,12 @@ git commit -m "refactor: 重构代码"
 - 📊 **完善监控体系**: 15步流程监控和性能分析
 - 🚀 **API保持兼容**: 100%向后兼容，无缝升级
 
-### v4.0.0 (2024-06-XX) - 轻量级协调器
+### v4.0.0 (2024-07-05) - 轻量级协调器
 - 🏗️ **轻量级协调器**: 主文件代码减少79%
 - 📦 **engines模块化**: 功能模块化设计
 - 🔧 **改善维护性**: 提高代码可维护性
 
-### v3.0.0 (2024-05-XX) - 基础工作流程
+### v3.0.0 (2024-07-01) - 基础工作流程
 - 🧠 **13步工作流程**: 完整的记忆处理流程
 - 📊 **性能监控**: 基础性能监控功能
 - 🎙️ **语音交互**: 语音输入输出支持

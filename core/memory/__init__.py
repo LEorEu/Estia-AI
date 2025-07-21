@@ -71,13 +71,12 @@ def safe_db_execute(db_manager: "DatabaseManager", query: str, params=None,
 
 # 主要组件导入
 try:
-    from .estia_memory_v5 import EstiaMemorySystem, create_estia_memory
+    from .estia_memory_v6 import EstiaMemorySystem, create_estia_memory
     from .managers.sync_flow.storage.memory_store import MemoryStore
     from .managers.sync_flow.init.db_manager import DatabaseManager
     
     # 子模块快捷导入
     from .managers.async_flow.association.network import AssociationNetwork
-    from .managers.sync_flow.context.builder import ContextBuilder
     from .managers.sync_flow.context.history import HistoryRetriever
     from .shared.embedding.vectorizer import TextVectorizer
     from .shared.embedding.cache import EmbeddingCache
@@ -99,7 +98,7 @@ try:
         # 主要组件
         'EstiaMemorySystem', 'create_estia_memory', 'MemoryStore', 'DatabaseManager',
         # 子模块组件
-        'AssociationNetwork', 'ContextBuilder', 'HistoryRetriever',
+        'AssociationNetwork', 'HistoryRetriever',
         'TextVectorizer', 'EmbeddingCache', 'AsyncMemoryEvaluator', 
         'MemoryScorer', 'FAISSSearchEngine', 'SmartRetriever',
         # 向后兼容
@@ -126,4 +125,4 @@ except Exception as e:
     __all__ = ['get_memory_logger', 'get_default_db_path', 'safe_db_execute']
 
 # 版本信息
-__version__ = "2.0.0" 
+__version__ = "2.0.0"

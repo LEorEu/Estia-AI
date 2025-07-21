@@ -19,6 +19,7 @@ import json                     # 导入 json 库，用于处理 JSON 数据格�
 from config import settings     # 从我们的配置文件中导入 settings。
 import time                     # 导入 time 库，用于格式化时间戳。
 import logging
+from core.dialogue.personality import get_fallback_prompt, get_estia_persona
 
 # 设置日志
 log_dir = getattr(settings, 'LOG_DIR', './logs')
@@ -70,75 +71,61 @@ class DialogueEngine:
         self.logger = logger
         self.logger.info("对话引擎初始化")
         
-    def generate_response(self, user_query, memory_context=None, personality=""):
+    def generate_response(self, user_query, memory_context=None):
         """
-        生成回复，考虑记忆上下文和人格
+        生成对话回复
         
         参数:
             user_query: 用户查询
-            memory_context: 相关记忆上下文
-            personality: 人格设定
+            memory_context: 已构建的完整上下文（由 ContextLengthManager 构建）
         
         返回:
             生成的回复
         """
-        # 构建完整提示
-        full_prompt = f"""请基于以下信息回答用户的问题或请求。
+        # 直接使用已构建的完整上下文
+        if memory_context:
+            # memory_context 已经是 ContextLengthManager 构建的完整上下文
+            # 包含：角色设定、当前会话、核心记忆、历史对话、相关记忆、重要总结、用户输入
+            full_prompt = memory_context
+        else:
+            # 降级方案：没有上下文时使用基础模板
+            full_prompt = get_fallback_prompt(user_query)
 
-{memory_context if memory_context else "没有找到相关记忆。"}
-
-用户请求: {user_query}
-
-请注意:
-1. 如果记忆中包含矛盾信息，请优先考虑标记为最新的信息
-2. 回答时考虑关联记忆提供的额外上下文
-3. 如果看到记忆摘要，可以利用其提供的整合信息
-4. 保持简洁自然的对话风格
-
-请基于上述信息给出回复:"""
-
-        # 调用LLM生成回复
-        response = self._get_llm_response(full_prompt, [], personality)
+        # 直接调用LLM，不进行二次包装
+        response = self._get_llm_response(full_prompt)
         return response
         
-    def generate_response_stream(self, user_query, memory_context=None, personality=""):
+    def generate_response_stream(self, user_query, memory_context=None):
         """
-        流式生成回复，逐字显示
+        流式生成对话回复
         
         参数:
             user_query: 用户查询
-            memory_context: 相关记忆上下文
-            personality: 人格设定
+            memory_context: 已构建的完整上下文（由 ContextLengthManager 构建）
         
         返回:
             生成的完整回复
         """
-        # 构建完整提示
-        full_prompt = f"""请基于以下信息回答用户的问题或请求。
+        # 直接使用已构建的完整上下文
+        if memory_context:
+            # memory_context 已经是 ContextLengthManager 构建的完整上下文
+            # 包含：角色设定、当前会话、核心记忆、历史对话、相关记忆、重要总结、用户输入
+            full_prompt = memory_context
+        else:
+            # 降级方案：没有上下文时使用基础模板
+            full_prompt = get_fallback_prompt(user_query)
 
-{memory_context if memory_context else "没有找到相关记忆。"}
-
-用户请求: {user_query}
-
-请注意:
-1. 如果记忆中包含矛盾信息，请优先考虑标记为最新的信息
-2. 回答时考虑关联记忆提供的额外上下文
-3. 如果看到记忆摘要，可以利用其提供的整合信息
-4. 保持简洁自然的对话风格
-
-请基于上述信息给出回复:"""
-
-        # 调用LLM流式生成回复
-        return self._get_llm_response_stream(full_prompt, [], personality)
+        # 直接调用LLM流式生成，不进行二次包装
+        return self._get_llm_response_stream(full_prompt)
         
     def _get_llm_response(self, prompt, history=None, personality=""):
         """
         使用大语言模型生成回复
         
         参数:
-            prompt: 提示文本
-            history: 历史对话 (可选)
-            personality: 人格设定 (可选)
+            prompt: 提示文本（可以是完整的上下文或简单提示）
+            history: 历史对话 (可选，用于兼容性)
+            personality: 人格设定 (可选，用于兼容性)
         
         返回:
             模型生成的回复
@@ -164,10 +151,20 @@ class DialogueEngine:
             })
         
         # 添加当前提示
-        messages.append({
-            "role": "user",
-            "content": prompt
-        })
+        # 如果 prompt 已经是完整的上下文（包含角色设定等），直接使用
+        # 否则作为用户消息处理
+        if prompt.strip().startswith(('[系统角色设定]', get_estia_persona()[:10], '[角色设定]')) or len(prompt) > 500:
+            # 这是一个完整的上下文，直接作为用户消息发送
+            messages.append({
+                "role": "user", 
+                "content": prompt
+            })
+        else:
+            # 这是一个简单的提示或评估请求
+            messages.append({
+                "role": "user",
+                "content": prompt
+            })
         
         # 根据提供商选择适当的API调用方法
         provider = settings.MODEL_PROVIDER.lower()
@@ -201,9 +198,9 @@ class DialogueEngine:
         使用大语言模型流式生成回复
         
         参数:
-            prompt: 提示文本
-            history: 历史对话 (可选)
-            personality: 人格设定 (可选)
+            prompt: 提示文本（可以是完整的上下文或简单提示）
+            history: 历史对话 (可选，用于兼容性)
+            personality: 人格设定 (可选，用于兼容性)
         
         返回:
             模型生成的完整回复
@@ -229,10 +226,20 @@ class DialogueEngine:
             })
         
         # 添加当前提示
-        messages.append({
-            "role": "user",
-            "content": prompt
-        })
+        # 如果 prompt 已经是完整的上下文（包含角色设定等），直接使用
+        # 否则作为用户消息处理
+        if prompt.strip().startswith(('[系统角色设定]', get_estia_persona()[:10], '[角色设定]')) or len(prompt) > 500:
+            # 这是一个完整的上下文，直接作为用户消息发送
+            messages.append({
+                "role": "user", 
+                "content": prompt
+            })
+        else:
+            # 这是一个简单的提示或评估请求
+            messages.append({
+                "role": "user",
+                "content": prompt
+            })
         
         # 根据提供商选择适当的流式API调用方法
         provider = settings.MODEL_PROVIDER.lower()

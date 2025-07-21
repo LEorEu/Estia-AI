@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -164,23 +163,63 @@
             transform: translateY(-2px);
         }
         
-        .alert {
-            padding: 12px;
-            border-radius: 6px;
-            margin: 10px 0;
-            border-left: 4px solid;
+        .test-btn {
+            position: fixed;
+            bottom: 80px;
+            right: 20px;
+            background: #48bb78;
+            color: white;
+            border: none;
+            border-radius: 50px;
+            padding: 15px 25px;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(72,187,120,0.4);
+            transition: all 0.3s ease;
         }
         
-        .alert-warning {
+        .test-btn:hover {
+            background: #38a169;
+            transform: translateY(-2px);
+        }
+        
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 9999;
+            max-width: 350px;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            animation: slideIn 0.3s ease-out;
+        }
+        
+        .notification.success {
+            background: #f0fff4;
+            border-left: 4px solid #48bb78;
+            color: #2f855a;
+        }
+        
+        .notification.error {
             background: #fef5e7;
-            border-color: #f6ad55;
+            border-left: 4px solid #f56565;
             color: #c53030;
         }
         
-        .alert-info {
+        .notification.info {
             background: #ebf8ff;
-            border-color: #4299e1;
+            border-left: 4px solid #4299e1;
             color: #2b6cb0;
+        }
+        
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        
+        @keyframes slideOut {
+            from { transform: translateX(0); opacity: 1; }
+            to { transform: translateX(100%); opacity: 0; }
         }
         
         @media (max-width: 768px) {
@@ -194,6 +233,9 @@
     <div class="header">
         <h1>🧠 Estia 记忆监控仪表板</h1>
         <p class="subtitle">13步记忆处理流程实时监控与分析</p>
+        <div id="data-source-indicator" style="margin-top: 10px; padding: 5px 15px; border-radius: 20px; display: inline-block; font-size: 0.9em;">
+            <span id="data-source-text">检测数据源中...</span>
+        </div>
     </div>
     
     <div class="container">
@@ -299,17 +341,97 @@
         </div>
     </div>
     
-    <button class="refresh-btn" onclick="refreshAllData()">
+    <button class="refresh-btn" onclick="manualRefresh()">
         🔄 刷新数据
     </button>
     
+    <button class="test-btn" onclick="loadTestData()">
+        🧪 加载测试数据
+    </button>
+
     <script>
+        // 全局变量
+        let performanceChart, memoryChart;
+        let dataCache = new Map();
+        let isUpdating = false;
+
         // WebSocket连接
         const socket = io();
-        
-        // 图表实例
-        let performanceChart, memoryChart;
-        
+
+        // 通知系统
+        function showNotification(message, type = 'info', duration = 5000) {
+            // 避免重复通知
+            const existingNotifications = document.querySelectorAll('.notification');
+            for (const existing of existingNotifications) {
+                if (existing.textContent.includes(message.substring(0, 20))) {
+                    return;
+                }
+            }
+
+            const notification = document.createElement('div');
+            notification.className = `notification ${type}`;
+
+            const icons = {
+                'error': '⚠️',
+                'info': 'ℹ️',
+                'success': '✅'
+            };
+
+            notification.innerHTML = `
+                <strong>${icons[type] || 'ℹ️'} ${type === 'error' ? '错误' : type === 'success' ? '成功' : '信息'}</strong><br>
+                ${message}
+                <button onclick="this.parentElement.remove()" style="float: right; background: none; border: none; font-size: 18px; cursor: pointer; color: inherit;">&times;</button>
+            `;
+
+            document.body.appendChild(notification);
+
+            setTimeout(() => {
+                if (notification.parentElement) {
+                    notification.style.animation = 'slideOut 0.3s ease-in';
+                    setTimeout(() => notification.remove(), 300);
+                }
+            }, duration);
+        }
+
+        function showErrorNotification(message) {
+            showNotification(message, 'error');
+        }
+
+        function showSuccessNotification(message) {
+            showNotification(message, 'success', 3000);
+        }
+
+        function showInfoNotification(message) {
+            showNotification(message, 'info', 4000);
+        }
+
+        // 防抖函数
+        function debounce(func, wait) {
+            let timeout;
+            return function executedFunction(...args) {
+                const later = () => {
+                    clearTimeout(timeout);
+                    func(...args);
+                };
+                clearTimeout(timeout);
+                timeout = setTimeout(later, wait);
+            };
+        }
+
+        // 节流函数
+        function throttle(func, limit) {
+            let inThrottle;
+            return function() {
+                const args = arguments;
+                const context = this;
+                if (!inThrottle) {
+                    func.apply(context, args);
+                    inThrottle = true;
+                    setTimeout(() => inThrottle = false, limit);
+                }
+            }
+        }
+
         // 初始化图表
         function initCharts() {
             // 性能趋势图
@@ -323,18 +445,30 @@
                         data: [],
                         borderColor: '#4299e1',
                         backgroundColor: 'rgba(66,153,225,0.1)',
-                        tension: 0.4
+                        tension: 0.4,
+                        pointRadius: 3,
+                        pointHoverRadius: 5
                     }]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    animation: { duration: 300 },
                     scales: {
-                        y: { beginAtZero: true }
+                        y: {
+                            beginAtZero: true,
+                            ticks: { maxTicksLimit: 6 }
+                        },
+                        x: {
+                            ticks: { maxTicksLimit: 10 }
+                        }
+                    },
+                    plugins: {
+                        legend: { display: false }
                     }
                 }
             });
-            
+
             // 记忆分析图
             const memCtx = document.getElementById('memory-chart').getContext('2d');
             memoryChart = new Chart(memCtx, {
@@ -343,198 +477,465 @@
                     labels: ['高相似度', '中相似度', '低相似度'],
                     datasets: [{
                         data: [0, 0, 0],
-                        backgroundColor: ['#48bb78', '#ed8936', '#f56565']
+                        backgroundColor: ['#48bb78', '#ed8936', '#f56565'],
+                        borderWidth: 0
                     }]
                 },
                 options: {
                     responsive: true,
-                    maintainAspectRatio: false
-                }
-            });
-        }
-        
-        // 更新状态显示
-        function updateStatus(data) {
-            const status = data.status;
-            const summary = data.summary;
-            
-            // 更新系统状态
-            const statusEl = document.getElementById('system-status');
-            const indicatorEl = statusEl.previousElementSibling;
-            
-            if (status.status === 'running') {
-                statusEl.textContent = '运行中';
-                indicatorEl.className = 'status-indicator status-running';
-            } else {
-                statusEl.textContent = '空闲';
-                indicatorEl.className = 'status-indicator status-idle';
-            }
-            
-            // 更新其他信息
-            document.getElementById('current-session').textContent = 
-                status.session_id || '无';
-            document.getElementById('runtime').textContent = 
-                (status.running_time || 0).toFixed(2) + 's';
-            document.getElementById('progress').textContent = 
-                (status.progress_percentage || 0).toFixed(1) + '%';
-            
-            // 更新性能统计
-            if (summary.total_sessions !== undefined) {
-                document.getElementById('total-sessions').textContent = summary.total_sessions;
-                document.getElementById('avg-duration').textContent = 
-                    (summary.average_duration || 0).toFixed(3) + 's';
-                document.getElementById('success-rate').textContent = 
-                    ((summary.success_rate || 0) * 100).toFixed(1) + '%';
-                
-                const slowest = summary.slowest_step;
-                document.getElementById('slowest-step').textContent = 
-                    slowest && slowest.step ? 
-                    `${slowest.step.split('_').pop()} (${(slowest.avg_duration || 0).toFixed(3)}s)` : '无';
-            }
-        }
-        
-        // 更新关键词云
-        function updateWordCloud(keywords) {
-            const container = document.getElementById('wordcloud');
-            container.innerHTML = '';
-            
-            if (keywords && keywords.top_keywords && keywords.top_keywords.length > 0) {
-                const wordList = keywords.top_keywords.map(item => [
-                    item.word, Math.max(12, Math.min(40, item.count * 8))
-                ]);
-                
-                WordCloud(container, {
-                    list: wordList,
-                    gridSize: 8,
-                    weightFactor: 2,
-                    fontFamily: 'Microsoft YaHei, sans-serif',
-                    color: function() {
-                        const colors = ['#4299e1', '#48bb78', '#ed8936', '#9f7aea', '#f56565'];
-                        return colors[Math.floor(Math.random() * colors.length)];
-                    },
-                    rotateRatio: 0.2,
-                    backgroundColor: '#f8f9fa'
-                });
-                
-                // 更新热门关键词
-                const topWords = keywords.top_keywords.slice(0, 3)
-                    .map(item => item.word).join(', ');
-                document.getElementById('top-keywords').textContent = topWords;
-            } else {
-                container.innerHTML = '<p style="text-align: center; margin-top: 100px; color: #a0aec0;">暂无关键词数据</p>';
-                document.getElementById('top-keywords').textContent = '暂无数据';
-            }
-        }
-        
-        // 更新会话列表
-        function updateSessionList(sessions) {
-            const container = document.getElementById('session-list');
-            
-            if (!sessions || sessions.length === 0) {
-                container.innerHTML = '<p>暂无会话数据</p>';
-                return;
-            }
-            
-            const html = sessions.map(session => `
-                <div class="session-item">
-                    <div class="session-header">
-                        <span class="session-id">${session.session_id}</span>
-                        <span class="session-duration">${session.duration.toFixed(3)}s</span>
-                    </div>
-                    <div class="session-query">"${session.user_input}"</div>
-                    <div style="font-size: 0.9em; color: #6b7280;">
-                        成功: ${session.success_count} | 失败: ${session.failed_count}
-                    </div>
-                </div>
-            `).join('');
-            
-            container.innerHTML = html;
-        }
-        
-        // 刷新所有数据
-        async function refreshAllData() {
-            try {
-                // 获取状态数据
-                const statusRes = await fetch('/api/status');
-                const statusData = await statusRes.json();
-                updateStatus(statusData);
-                
-                // 获取关键词数据
-                const keywordRes = await fetch('/api/keywords');
-                if (keywordRes.ok) {
-                    const keywordData = await keywordRes.json();
-                    if (keywordData.keywords) {
-                        updateWordCloud(keywordData.keywords);
-                    }
-                }
-                
-                // 获取会话数据
-                const sessionRes = await fetch('/api/sessions');
-                if (sessionRes.ok) {
-                    const sessionData = await sessionRes.json();
-                    updateSessionList(sessionData.sessions);
-                    
-                    // 更新性能图表
-                    if (sessionData.sessions.length > 0) {
-                        const labels = sessionData.sessions.map((_, i) => `会话${i+1}`);
-                        const durations = sessionData.sessions.map(s => s.duration);
-                        
-                        performanceChart.data.labels = labels.slice(-10); // 最近10个
-                        performanceChart.data.datasets[0].data = durations.slice(-10);
-                        performanceChart.update();
-                    }
-                }
-                
-                // 获取记忆分析数据
-                const memoryRes = await fetch('/api/memory_analysis');
-                if (memoryRes.ok) {
-                    const memoryData = await memoryRes.json();
-                    if (memoryData.memory) {
-                        const memory = memoryData.memory;
-                        document.getElementById('avg-similarity').textContent = 
-                            (memory.average_similarity || 0).toFixed(3);
-                        document.getElementById('retrieval-count').textContent = 
-                            memory.total_retrievals || 0;
-                        document.getElementById('associations-count').textContent = 
-                            memory.memory_usage_stats?.associations || 0;
-                        
-                        // 更新相似度分布图
-                        if (memory.similarity_distribution) {
-                            const dist = memory.similarity_distribution;
-                            memoryChart.data.datasets[0].data = [
-                                dist['高 (>0.8)'] || 0,
-                                dist['中 (0.6-0.8)'] || 0,
-                                dist['低 (<0.6)'] || 0
-                            ];
-                            memoryChart.update();
+                    maintainAspectRatio: false,
+                    animation: { duration: 300 },
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: {
+                                boxWidth: 12,
+                                padding: 10
+                            }
                         }
                     }
                 }
-                
-            } catch (error) {
-                console.error('刷新数据失败:', error);
+            });
+        }
+
+        // 更新状态显示
+        function updateStatus(data) {
+            if (!data || !data.status) return;
+
+            const status = data.status;
+            const summary = data.summary || {};
+
+            // 更新系统状态
+            const statusEl = document.getElementById('system-status');
+            const indicatorEl = statusEl?.previousElementSibling;
+
+            if (statusEl && indicatorEl) {
+                if (status.status === 'running') {
+                    statusEl.textContent = '运行中';
+                    indicatorEl.className = 'status-indicator status-running';
+                } else {
+                    statusEl.textContent = '空闲';
+                    indicatorEl.className = 'status-indicator status-idle';
+                }
+            }
+
+            // 批量更新DOM
+            const elementUpdates = [
+                ['current-session', status.session_id || '无'],
+                ['runtime', (status.running_time || 0).toFixed(2) + 's'],
+                ['progress', (status.progress_percentage || 0).toFixed(1) + '%']
+            ];
+
+            if (summary.total_sessions !== undefined) {
+                elementUpdates.push(
+                    ['total-sessions', summary.total_sessions],
+                    ['avg-duration', (summary.average_duration || 0).toFixed(3) + 's'],
+                    ['success-rate', ((summary.success_rate || 0) * 100).toFixed(1) + '%']
+                );
+
+                const slowest = summary.slowest_step;
+                const slowestText = slowest && slowest.step ?
+                    `${slowest.step.split('_').pop()} (${(slowest.avg_duration || 0).toFixed(3)}s)` : '无';
+                elementUpdates.push(['slowest-step', slowestText]);
+            }
+
+            // 执行DOM更新
+            requestAnimationFrame(() => {
+                elementUpdates.forEach(([id, value]) => {
+                    const element = document.getElementById(id);
+                    if (element && element.textContent !== String(value)) {
+                        element.textContent = value;
+                    }
+                });
+            });
+        }
+
+        // 更新关键词云
+        const updateWordCloud = debounce(function(keywords) {
+            const container = document.getElementById('wordcloud');
+            if (!container) return;
+
+            // 检查数据是否变化
+            const cacheKey = 'wordcloud_data';
+            const cachedData = dataCache.get(cacheKey);
+            const currentData = JSON.stringify(keywords);
+
+            if (cachedData === currentData) return;
+            dataCache.set(cacheKey, currentData);
+
+            requestAnimationFrame(() => {
+                if (keywords && keywords.top_keywords && keywords.top_keywords.length > 0) {
+                    const wordList = keywords.top_keywords.map(item => [
+                        item.word, Math.max(12, Math.min(40, item.count * 8))
+                    ]);
+
+                    container.innerHTML = '';
+
+                    try {
+                        WordCloud(container, {
+                            list: wordList,
+                            gridSize: 10,
+                            weightFactor: 1.5,
+                            fontFamily: 'Microsoft YaHei, sans-serif',
+                            color: function() {
+                                const colors = ['#4299e1', '#48bb78', '#ed8936', '#9f7aea', '#f56565'];
+                                return colors[Math.floor(Math.random() * colors.length)];
+                            },
+                            rotateRatio: 0.1,
+                            backgroundColor: '#f8f9fa',
+                            minSize: 12,
+                            drawOutOfBound: false
+                        });
+
+                        const topWords = keywords.top_keywords.slice(0, 3)
+                            .map(item => item.word).join(', ');
+                        const topKeywordsEl = document.getElementById('top-keywords');
+                        if (topKeywordsEl) {
+                            topKeywordsEl.textContent = topWords;
+                        }
+                    } catch (error) {
+                        console.warn('词云生成失败:', error);
+                        container.innerHTML = '<p style="text-align: center; margin-top: 100px; color: #f56565;">词云生成失败</p>';
+                    }
+                } else {
+                    container.innerHTML = '<p style="text-align: center; margin-top: 100px; color: #a0aec0;">暂无关键词数据</p>';
+                    const topKeywordsEl = document.getElementById('top-keywords');
+                    if (topKeywordsEl) {
+                        topKeywordsEl.textContent = '暂无数据';
+                    }
+                }
+            });
+        }, 2000);
+
+        // 更新会话列表
+        const updateSessionList = throttle(function(sessions) {
+            const container = document.getElementById('session-list');
+            if (!container) return;
+
+            // 检查数据是否变化
+            const cacheKey = 'session_list_data';
+            const cachedData = dataCache.get(cacheKey);
+            const currentData = JSON.stringify(sessions);
+
+            if (cachedData === currentData) return;
+            dataCache.set(cacheKey, currentData);
+
+            requestAnimationFrame(() => {
+                if (!sessions || sessions.length === 0) {
+                    container.innerHTML = '<p style="text-align: center; color: #a0aec0; padding: 20px;">暂无会话数据</p>';
+                    return;
+                }
+
+                const fragment = document.createDocumentFragment();
+
+                sessions.forEach(session => {
+                    const sessionDiv = document.createElement('div');
+                    sessionDiv.className = 'session-item';
+
+                    const sessionId = session.session_id || 'unknown';
+                    const duration = (session.duration || 0).toFixed(3);
+                    const userInput = (session.user_input || '').substring(0, 100);
+                    const successCount = session.success_count || 0;
+                    const failedCount = session.failed_count || 0;
+
+                    sessionDiv.innerHTML = `
+                        <div class="session-header">
+                            <span class="session-id">${sessionId}</span>
+                            <span class="session-duration">${duration}s</span>
+                        </div>
+                        <div class="session-query">"${userInput}"</div>
+                        <div style="font-size: 0.9em; color: #6b7280;">
+                            成功: ${successCount} | 失败: ${failedCount}
+                        </div>
+                    `;
+
+                    fragment.appendChild(sessionDiv);
+                });
+
+                container.innerHTML = '';
+                container.appendChild(fragment);
+            });
+        }, 1500);
+
+        // 更新性能图表
+        const updatePerformanceChart = throttle(function(labels, data) {
+            if (!performanceChart || !labels || !data) return;
+
+            const currentData = performanceChart.data.datasets[0].data;
+            if (JSON.stringify(currentData) === JSON.stringify(data)) return;
+
+            performanceChart.data.labels = labels;
+            performanceChart.data.datasets[0].data = data;
+            performanceChart.update('none');
+        }, 1000);
+
+        // 更新记忆图表
+        const updateMemoryChart = throttle(function(data) {
+            if (!memoryChart || !data) return;
+
+            const currentData = memoryChart.data.datasets[0].data;
+            if (JSON.stringify(currentData) === JSON.stringify(data)) return;
+
+            memoryChart.data.datasets[0].data = data;
+            memoryChart.update('none');
+        }, 1000);
+
+        // 更新记忆分析
+        function updateMemoryAnalysis(memory) {
+            if (!memory) return;
+
+            const updates = [
+                ['avg-similarity', (memory.average_similarity || 0).toFixed(3)],
+                ['retrieval-count', memory.total_retrievals || 0],
+                ['associations-count', memory.memory_usage_stats?.associations || 0]
+            ];
+
+            requestAnimationFrame(() => {
+                updates.forEach(([id, value]) => {
+                    const element = document.getElementById(id);
+                    if (element && element.textContent !== String(value)) {
+                        element.textContent = value;
+                    }
+                });
+            });
+
+            if (memory.similarity_distribution) {
+                const dist = memory.similarity_distribution;
+                const chartData = [
+                    dist['高 (>0.8)'] || 0,
+                    dist['中 (0.6-0.8)'] || 0,
+                    dist['低 (<0.6)'] || 0
+                ];
+                updateMemoryChart(chartData);
             }
         }
-        
+
+        // 批量数据刷新函数
+        async function refreshAllData() {
+            if (isUpdating) {
+                console.log('正在更新中，跳过本次刷新');
+                return;
+            }
+
+            isUpdating = true;
+            const startTime = performance.now();
+
+            try {
+                const response = await fetch('/api/dashboard_data');
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const data = await response.json();
+
+                // 更新数据源指示器
+                updateDataSourceIndicator(data);
+
+                if (data.error && !data.has_data) {
+                    if (data.error.includes('暂无数据')) {
+                        showInfoNotification('暂无监控数据，可以点击"加载测试数据"查看界面效果');
+                    } else {
+                        showErrorNotification(data.error);
+                    }
+                }
+
+                // 批量更新所有组件
+                const updatePromises = [];
+
+                if (data.status) {
+                    updatePromises.push(Promise.resolve(updateStatus(data.status)));
+                }
+
+                if (data.keywords) {
+                    updatePromises.push(Promise.resolve(updateWordCloud(data.keywords)));
+                }
+
+                if (data.sessions && data.sessions.sessions) {
+                    updatePromises.push(Promise.resolve(updateSessionList(data.sessions.sessions)));
+
+                    if (data.sessions.sessions.length > 0) {
+                        const sessions = data.sessions.sessions;
+                        const labels = sessions.map((_, i) => `会话${i+1}`);
+                        const durations = sessions.map(s => s.duration || 0);
+
+                        updatePromises.push(Promise.resolve(
+                            updatePerformanceChart(labels.slice(-10), durations.slice(-10))
+                        ));
+                    }
+                }
+
+                if (data.memory) {
+                    updatePromises.push(Promise.resolve(updateMemoryAnalysis(data.memory)));
+                }
+
+                await Promise.all(updatePromises);
+
+                const endTime = performance.now();
+                console.log(`数据刷新完成，耗时: ${(endTime - startTime).toFixed(2)}ms`);
+
+            } catch (error) {
+                console.error('批量数据刷新失败:', error);
+                showErrorNotification('数据刷新失败: ' + error.message);
+            } finally {
+                isUpdating = false;
+            }
+        }
+
+        // 全局手动刷新函数
+        window.manualRefresh = async function() {
+            try {
+                showInfoNotification('正在刷新数据...');
+                await refreshAllData();
+                showSuccessNotification('数据刷新成功！');
+            } catch (error) {
+                console.error('手动刷新失败:', error);
+                showErrorNotification('数据刷新失败: ' + error.message);
+            }
+        };
+
+        // 全局测试数据加载函数
+        window.loadTestData = async function() {
+            try {
+                showInfoNotification('正在加载测试数据...');
+
+                const response = await fetch('/api/generate_test_data');
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const data = await response.json();
+
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+
+                // 更新所有组件
+                if (data.status) {
+                    updateStatus(data.status);
+                }
+
+                if (data.keywords) {
+                    updateWordCloud(data.keywords);
+                }
+
+                if (data.sessions && data.sessions.sessions) {
+                    updateSessionList(data.sessions.sessions);
+
+                    const sessions = data.sessions.sessions;
+                    const labels = sessions.map((_, i) => `会话${i+1}`);
+                    const durations = sessions.map(s => s.duration || 0);
+                    updatePerformanceChart(labels, durations);
+                }
+
+                if (data.memory) {
+                    updateMemoryAnalysis(data.memory);
+                }
+
+                showSuccessNotification('测试数据加载成功！现在可以看到界面效果了。');
+
+            } catch (error) {
+                console.error('加载测试数据失败:', error);
+                showErrorNotification('测试数据加载失败: ' + error.message);
+            }
+        };
+
         // WebSocket事件处理
         socket.on('connect', function() {
-            console.log('连接到监控服务器');
+            console.log('✅ 连接到监控服务器');
             socket.emit('start_monitoring');
+            showSuccessNotification('实时监控连接已建立');
         });
-        
+
+        socket.on('disconnect', function() {
+            console.log('❌ 与监控服务器断开连接');
+            showErrorNotification('实时监控连接已断开');
+        });
+
         socket.on('status_update', function(data) {
-            updateStatus(data);
+            try {
+                updateStatus(data);
+            } catch (error) {
+                console.error('状态更新失败:', error);
+            }
         });
-        
+
+        socket.on('monitoring_error', function(data) {
+            console.error('监控错误:', data);
+            showErrorNotification('监控服务出现错误: ' + data.error);
+        });
+
+        socket.on('connect_error', function(error) {
+            console.error('WebSocket连接错误:', error);
+            showErrorNotification('无法连接到监控服务器');
+        });
+
+        // 更新数据源指示器
+        function updateDataSourceIndicator(data) {
+            const indicator = document.getElementById('data-source-indicator');
+            const textElement = document.getElementById('data-source-text');
+
+            if (!indicator || !textElement) return;
+
+            let text = '未知数据源';
+            let bgColor = '#a0aec0';
+            let textColor = '#2d3748';
+
+            if (data.live_mode) {
+                text = '🔴 实时数据 (连接到运行中的Estia系统)';
+                bgColor = '#c6f6d5';
+                textColor = '#2f855a';
+            } else if (data.test_mode) {
+                text = '🧪 测试数据 (模拟数据)';
+                bgColor = '#feebc8';
+                textColor = '#c05621';
+            } else if (data.data_source === 'mock_monitor') {
+                text = '⚠️ 模拟监控 (Estia系统未运行)';
+                bgColor = '#fed7d7';
+                textColor = '#c53030';
+            }
+
+            indicator.style.backgroundColor = bgColor;
+            indicator.style.color = textColor;
+            textElement.textContent = text;
+        }
+
         // 页面加载完成后初始化
         document.addEventListener('DOMContentLoaded', function() {
+            console.log('初始化仪表板...');
+
+            // 初始化图表
             initCharts();
-            refreshAllData();
-            
+
+            // 更新数据源指示器初始状态
+            const indicator = document.getElementById('data-source-indicator');
+            if (indicator) {
+                indicator.style.backgroundColor = '#e2e8f0';
+                indicator.style.color = '#4a5568';
+            }
+
+            // 首次加载数据
+            refreshAllData().then(() => {
+                console.log('初始数据加载完成');
+            }).catch(error => {
+                console.error('初始数据加载失败:', error);
+                showErrorNotification('初始数据加载失败');
+            });
+
             // 定期刷新数据
-            setInterval(refreshAllData, 5000); // 每5秒刷新一次
+            setInterval(() => {
+                if (!isUpdating) {
+                    refreshAllData().catch(console.error);
+                }
+            }, 8000); // 每8秒刷新一次
+
+            // 页面可见性变化监听
+            document.addEventListener('visibilitychange', function() {
+                if (!document.hidden) {
+                    // 页面变为可见时立即刷新
+                    refreshAllData().catch(console.error);
+                }
+            });
         });
     </script>
 </body>
 </html>
-    

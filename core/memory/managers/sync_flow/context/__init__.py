@@ -5,7 +5,6 @@
 提供对话历史检索和上下文构建功能
 """
 
-from .builder import ContextBuilder
 from .history import HistoryRetriever
 
-__all__ = ['ContextBuilder', 'HistoryRetriever']
+__all__ = ['HistoryRetriever']

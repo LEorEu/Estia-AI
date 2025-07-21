@@ -17,8 +17,11 @@ nvm use 20.15.0            # ← 这一步改 PATH，下面会手动刷新缓存
 Set-Location $Project
 
 # ---------- 4. 设置本会话环境变量 ----------
-$Env:ANTHROPIC_BASE_URL   = "https://anyrouter.top"
-$Env:ANTHROPIC_AUTH_TOKEN = "sk-oP6eIEGVU4v4VjASsgjjiv9jbo98NfpyqZATdLc1GEnpqLje"
+$Env:ANTHROPIC_BASE_URL   = "https://relay01.gaccode.com/claudecode"
+# $Env:ANTHROPIC_AUTH_TOKEN = "sk-ant-oat01-e108b9b0d69a97f63b10b1fd8e1e12720dae21eabb360a9625de34fa5b724f88"
+$env:ANTHROPIC_API_KEY = "sk-ant-oat01-e108b9b0d69a97f63b10b1fd8e1e12720dae21eabb360a9625de34fa5b724f88"
+
+$newJson = $(if (Test-Path "C:\Users\asus\.claude.json") { Get-Content "C:\Users\asus\.claude.json" -Raw } else { "null" }) | jq --arg key "$($env:ANTHROPIC_API_KEY.Substring($env:ANTHROPIC_API_KEY.Length - 20))" '(. // {}) | .customApiKeyResponses.approved |= ([.[]?, $key] | unique)'; [System.IO.File]::WriteAllText("C:\Users\asus\.claude.json", $newJson)
 
 $Env:HTTP_PROXY  = "http://127.0.0.1:7890"
 $Env:HTTPS_PROXY = "http://127.0.0.1:7890"

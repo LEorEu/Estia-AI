@@ -148,37 +148,54 @@ class MemoryFlowMonitor(ErrorHandlerMixin):
     
     def get_13_step_monitoring(self) -> Dict[str, Any]:
         """
-        获取13步流程监控详情
-        
+        获取14步流程监控详情（修正版）
+
         Returns:
-            Dict: 13步流程的详细监控信息
+            Dict: 14步流程的详细监控信息
         """
         try:
             if not self.pipeline_monitor:
                 return {'error': 'Pipeline监控器未初始化'}
-            
+
             # 获取每个步骤的监控数据
             step_stats = {}
-            
-            # 同步流程监控 (Step 1-9)
+
+            # 同步流程监控 (Step 1-9) - 实时查询阶段
             sync_steps = [
-                'system_init', 'component_init', 'async_evaluator_init',
-                'cache_vectorization', 'faiss_search', 'association_expansion',
-                'history_aggregation', 'weight_ranking', 'context_assembly'
+                'database_initialization',
+                'component_initialization',
+                'async_evaluator_initialization',
+                'unified_cache_vectorization',
+                'faiss_vector_retrieval',
+                'association_network_expansion',
+                'history_dialogue_aggregation',
+                'weight_ranking_deduplication',
+                'final_context_assembly'
             ]
-            
-            # 异步流程监控 (Step 10-15)
+
+            # 异步流程监控 (Step 10-14) - 存储和评估阶段
             async_steps = [
-                'async_queue_trigger', 'llm_evaluation', 'weight_update',
-                'layer_adjustment', 'summary_generation', 'association_creation'
+                'llm_response_generation',
+                'immediate_dialogue_storage',
+                'async_llm_evaluation',
+                'save_evaluation_results',
+                'auto_association_creation'
             ]
-            
+
             all_steps = sync_steps + async_steps
-            
+
             for i, step in enumerate(all_steps, 1):
-                step_data = self.pipeline_monitor.get_step_stats(step)
-                step_stats[f'step_{i:02d}_{step}'] = step_data
-            
+                try:
+                    step_data = self.pipeline_monitor.get_step_stats(step)
+                    step_stats[f'step_{i:02d}_{step}'] = step_data
+                except Exception as step_error:
+                    # 如果某个步骤获取失败，记录错误但继续
+                    self.logger.warning(f"获取步骤 {step} 统计失败: {step_error}")
+                    step_stats[f'step_{i:02d}_{step}'] = {
+                        'error': str(step_error),
+                        'status': 'unavailable'
+                    }
+
             return {
                 'timestamp': time.time(),
                 'total_steps': len(all_steps),
@@ -187,9 +204,9 @@ class MemoryFlowMonitor(ErrorHandlerMixin):
                 'step_details': step_stats,
                 'overall_performance': self._calculate_overall_performance(step_stats)
             }
-            
+
         except Exception as e:
-            self.logger.error(f"获取13步监控失败: {e}")
+            self.logger.error(f"获取14步监控失败: {e}")
             return {'error': str(e)}
     
     def _calculate_overall_performance(self, step_stats: Dict[str, Any]) -> Dict[str, Any]:
