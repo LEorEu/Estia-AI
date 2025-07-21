@@ -101,6 +101,3 @@ development_plan/
 
 .claude/
 test_result/
-
-run_claude.bat
-run_claude.ps1
