@@ -51,6 +51,144 @@ def speak(text: str):
     """
     asyncio.run(text_to_speech(text))
 
+def speak_stream(text_generator):
+    """
+    流式语音输出，边接收文本边生成语音并播放
+    
+    参数:
+        text_generator: 文本生成器，yield文本片段
+    """
+    asyncio.run(text_to_speech_stream(text_generator))
+
+async def text_to_speech_stream(text_generator):
+    """
+    流式文本转语音，边接收文本边生成语音并播放
+    
+    参数:
+        text_generator: 文本生成器，yield文本片段
+    """
+    print("🔊 AI 开始流式语音输出...")
+    
+    # 音频片段队列
+    audio_segments = []
+    current_text = ""
+    
+    try:
+        for text_chunk in text_generator:
+            # 打印文本
+            print(text_chunk, end="", flush=True)
+            current_text += text_chunk
+            
+            # 当累积的文本达到一定长度或遇到标点符号时，生成语音
+            if _should_generate_audio(current_text):
+                audio_file = await _generate_audio_segment(current_text)
+                if audio_file:
+                    audio_segments.append(audio_file)
+                    # 播放音频片段
+                    await _play_audio_segment(audio_file)
+                current_text = ""
+        
+        # 处理剩余的文本
+        if current_text.strip():
+            audio_file = await _generate_audio_segment(current_text)
+            if audio_file:
+                audio_segments.append(audio_file)
+                await _play_audio_segment(audio_file)
+        
+        print()  # 换行
+        
+    except Exception as e:
+        print(f"\n❌ 流式语音输出过程中发生错误: {e}")
+    finally:
+        # 清理临时文件
+        await _cleanup_audio_segments(audio_segments)
+
+def _should_generate_audio(text: str) -> bool:
+    """
+    判断是否应该生成音频片段
+    
+    参数:
+        text: 当前累积的文本
+        
+    返回:
+        是否应该生成音频
+    """
+    # 遇到句号、问号、感叹号时生成音频
+    sentence_endings = ['。', '！', '？', '.', '!', '?']
+    if any(ending in text for ending in sentence_endings):
+        return True
+    
+    # 文本长度超过50个字符时生成音频
+    if len(text) >= 50:
+        return True
+    
+    return False
+
+async def _generate_audio_segment(text: str) -> str | None:
+    """
+    生成音频片段
+    
+    参数:
+        text: 要转换的文本
+        
+    返回:
+        音频文件路径
+    """
+    if not text.strip():
+        return None
+    
+    try:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        audio_file = os.path.join(AUDIO_DIR, f"segment_{timestamp}.mp3")
+        
+        communicate = edge_tts.Communicate(text, VOICE)
+        await communicate.save(audio_file)
+        
+        return audio_file
+    except Exception as e:
+        print(f"❌ 生成音频片段失败: {e}")
+        return None
+
+async def _play_audio_segment(audio_file: str):
+    """
+    播放音频片段
+    
+    参数:
+        audio_file: 音频文件路径
+    """
+    try:
+        # 加载音频文件
+        pygame.mixer.music.load(audio_file)
+        
+        # 开始播放
+        pygame.mixer.music.play()
+        
+        # 等待播放完成
+        while pygame.mixer.music.get_busy():
+            await asyncio.sleep(0.1)
+        
+        # 停止并卸载
+        pygame.mixer.music.stop()
+        pygame.mixer.music.unload()
+        
+    except Exception as e:
+        print(f"❌ 播放音频片段失败: {e}")
+
+async def _cleanup_audio_segments(audio_segments: list):
+    """
+    清理音频片段文件
+    
+    参数:
+        audio_segments: 音频文件路径列表
+    """
+    for audio_file in audio_segments:
+        try:
+            if os.path.exists(audio_file):
+                await asyncio.sleep(0.1)  # 确保文件句柄已释放
+                os.remove(audio_file)
+        except Exception as e:
+            print(f"❌ 清理音频文件失败: {e}")
+
 async def text_to_speech(text_to_speak: str):
     """
     将输入的文本转换为语音，并使用 Pygame 播放出来。
@@ -80,7 +218,7 @@ async def text_to_speech(text_to_speak: str):
         #    pygame.mixer.music.get_busy() 会在音乐播放时返回 True，播放结束时返回 False。
         while pygame.mixer.music.get_busy():
             # 在等待时，让程序短暂休眠一下（例如0.1秒），避免这个 while 循环一直空转，过度消耗CPU资源。
-            time.sleep(0.1)
+            await asyncio.sleep(0.1)
 
     except Exception as e:
         print(f"❌ 在文本转语音或播放过程中发生错误: {e}")
@@ -93,7 +231,7 @@ async def text_to_speech(text_to_speak: str):
         pygame.mixer.music.unload() 
         if os.path.exists(temp_audio_file):
             # 加一个小小的延迟，确保操作系统有时间释放文件锁
-            time.sleep(0.1) 
+            await asyncio.sleep(0.1) 
             os.remove(temp_audio_file)
             # print(f"🗑️ 已删除临时文件: {temp_audio_file}")
 

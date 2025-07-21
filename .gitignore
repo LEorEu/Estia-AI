@@ -97,3 +97,6 @@ config/local_settings.py
 
 #开发计划
 development_plan/
+
+.claude/
+test_result/

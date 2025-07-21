@@ -61,6 +61,31 @@ def parse_arguments():
         help="交互模式: voice (语音), text (文本), api (API服务)"
     )
     
+    # 添加流式输出相关参数
+    parser.add_argument(
+        "--stream",
+        action="store_true",
+        help="启用流式输出（文本和语音）"
+    )
+    
+    parser.add_argument(
+        "--text-stream",
+        action="store_true",
+        help="仅启用文本流式输出"
+    )
+    
+    parser.add_argument(
+        "--audio-stream",
+        action="store_true",
+        help="仅启用语音流式输出"
+    )
+    
+    parser.add_argument(
+        "--no-stream",
+        action="store_true",
+        help="禁用所有流式输出"
+    )
+    
     return parser.parse_args()
 
 def main():
@@ -71,6 +96,32 @@ def main():
     
     # 解析命令行参数
     args = parse_arguments()
+    
+    # 根据命令行参数更新流式输出配置
+    if args.no_stream:
+        settings.ENABLE_STREAM_OUTPUT = False
+        settings.ENABLE_TEXT_STREAM = False
+        settings.ENABLE_AUDIO_STREAM = False
+    elif args.stream:
+        settings.ENABLE_STREAM_OUTPUT = True
+        settings.ENABLE_TEXT_STREAM = True
+        settings.ENABLE_AUDIO_STREAM = True
+    elif args.text_stream:
+        settings.ENABLE_STREAM_OUTPUT = True
+        settings.ENABLE_TEXT_STREAM = True
+        settings.ENABLE_AUDIO_STREAM = False
+    elif args.audio_stream:
+        settings.ENABLE_STREAM_OUTPUT = True
+        settings.ENABLE_TEXT_STREAM = False
+        settings.ENABLE_AUDIO_STREAM = True
+    
+    # 显示流式输出配置
+    if settings.ENABLE_STREAM_OUTPUT:
+        logger.info("流式输出配置:")
+        logger.info(f"  文本流式输出: {'启用' if settings.ENABLE_TEXT_STREAM else '禁用'}")
+        logger.info(f"  语音流式输出: {'启用' if settings.ENABLE_AUDIO_STREAM else '禁用'}")
+        logger.info(f"  流式模式: {settings.STREAM_MODE}")
+        logger.info(f"  优先级: {settings.STREAM_PRIORITY}")
     
     try:
         # 导入并运行应用

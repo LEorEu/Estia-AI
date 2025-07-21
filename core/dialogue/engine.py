@@ -19,6 +19,7 @@ import json                     # 导入 json 库，用于处理 JSON 数据格�
 from config import settings     # 从我们的配置文件中导入 settings。
 import time                     # 导入 time 库，用于格式化时间戳。
 import logging
+from core.dialogue.personality import get_fallback_prompt, get_estia_persona
 
 # 设置日志
 log_dir = getattr(settings, 'LOG_DIR', './logs')
@@ -70,45 +71,61 @@ class DialogueEngine:
         self.logger = logger
         self.logger.info("对话引擎初始化")
         
-    def generate_response(self, user_query, memory_context=None, personality=""):
+    def generate_response(self, user_query, memory_context=None):
         """
-        生成回复，考虑记忆上下文和人格
+        生成对话回复
         
         参数:
             user_query: 用户查询
-            memory_context: 相关记忆上下文
-            personality: 人格设定
+            memory_context: 已构建的完整上下文（由 ContextLengthManager 构建）
         
         返回:
             生成的回复
         """
-        # 构建完整提示
-        full_prompt = f"""请基于以下信息回答用户的问题或请求。
+        # 直接使用已构建的完整上下文
+        if memory_context:
+            # memory_context 已经是 ContextLengthManager 构建的完整上下文
+            # 包含：角色设定、当前会话、核心记忆、历史对话、相关记忆、重要总结、用户输入
+            full_prompt = memory_context
+        else:
+            # 降级方案：没有上下文时使用基础模板
+            full_prompt = get_fallback_prompt(user_query)
 
-{memory_context if memory_context else "没有找到相关记忆。"}
-
-用户请求: {user_query}
-
-请注意:
-1. 如果记忆中包含矛盾信息，请优先考虑标记为最新的信息
-2. 回答时考虑关联记忆提供的额外上下文
-3. 如果看到记忆摘要，可以利用其提供的整合信息
-4. 保持简洁自然的对话风格
-
-请基于上述信息给出回复:"""
-
-        # 调用LLM生成回复
-        response = self._get_llm_response(full_prompt, [], personality)
+        # 直接调用LLM，不进行二次包装
+        response = self._get_llm_response(full_prompt)
         return response
+        
+    def generate_response_stream(self, user_query, memory_context=None):
+        """
+        流式生成对话回复
+        
+        参数:
+            user_query: 用户查询
+            memory_context: 已构建的完整上下文（由 ContextLengthManager 构建）
+        
+        返回:
+            生成的完整回复
+        """
+        # 直接使用已构建的完整上下文
+        if memory_context:
+            # memory_context 已经是 ContextLengthManager 构建的完整上下文
+            # 包含：角色设定、当前会话、核心记忆、历史对话、相关记忆、重要总结、用户输入
+            full_prompt = memory_context
+        else:
+            # 降级方案：没有上下文时使用基础模板
+            full_prompt = get_fallback_prompt(user_query)
+
+        # 直接调用LLM流式生成，不进行二次包装
+        return self._get_llm_response_stream(full_prompt)
         
     def _get_llm_response(self, prompt, history=None, personality=""):
         """
         使用大语言模型生成回复
         
         参数:
-            prompt: 提示文本
-            history: 历史对话 (可选)
-            personality: 人格设定 (可选)
+            prompt: 提示文本（可以是完整的上下文或简单提示）
+            history: 历史对话 (可选，用于兼容性)
+            personality: 人格设定 (可选，用于兼容性)
         
         返回:
             模型生成的回复
@@ -134,10 +151,20 @@ class DialogueEngine:
             })
         
         # 添加当前提示
-        messages.append({
-            "role": "user",
-            "content": prompt
-        })
+        # 如果 prompt 已经是完整的上下文（包含角色设定等），直接使用
+        # 否则作为用户消息处理
+        if prompt.strip().startswith(('[系统角色设定]', get_estia_persona()[:10], '[角色设定]')) or len(prompt) > 500:
+            # 这是一个完整的上下文，直接作为用户消息发送
+            messages.append({
+                "role": "user", 
+                "content": prompt
+            })
+        else:
+            # 这是一个简单的提示或评估请求
+            messages.append({
+                "role": "user",
+                "content": prompt
+            })
         
         # 根据提供商选择适当的API调用方法
         provider = settings.MODEL_PROVIDER.lower()
@@ -164,6 +191,81 @@ class DialogueEngine:
                 
         except Exception as e:
             self.logger.error(f"LLM调用失败: {e}")
+            return f"抱歉，无法完成请求。错误: {str(e)}"
+
+    def _get_llm_response_stream(self, prompt, history=None, personality=""):
+        """
+        使用大语言模型流式生成回复
+        
+        参数:
+            prompt: 提示文本（可以是完整的上下文或简单提示）
+            history: 历史对话 (可选，用于兼容性)
+            personality: 人格设定 (可选，用于兼容性)
+        
+        返回:
+            模型生成的完整回复
+        """
+        if history is None:
+            history = []
+        
+        # 构建消息数组
+        messages = []
+        
+        # 添加人格设定 (如果有)
+        if personality:
+            messages.append({
+                "role": "system",
+                "content": personality
+            })
+        
+        # 添加历史对话
+        for entry in history:
+            messages.append({
+                "role": entry.get("role", "user"),
+                "content": entry.get("content", "")
+            })
+        
+        # 添加当前提示
+        # 如果 prompt 已经是完整的上下文（包含角色设定等），直接使用
+        # 否则作为用户消息处理
+        if prompt.strip().startswith(('[系统角色设定]', get_estia_persona()[:10], '[角色设定]')) or len(prompt) > 500:
+            # 这是一个完整的上下文，直接作为用户消息发送
+            messages.append({
+                "role": "user", 
+                "content": prompt
+            })
+        else:
+            # 这是一个简单的提示或评估请求
+            messages.append({
+                "role": "user",
+                "content": prompt
+            })
+        
+        # 根据提供商选择适当的流式API调用方法
+        provider = settings.MODEL_PROVIDER.lower()
+        
+        # 请求LLM流式响应
+        try:
+            self.logger.debug(f"使用{provider}提供商发送流式请求，消息数: {len(messages)}")
+            
+            if provider == "local":
+                # 使用本地LLM API流式调用
+                return self._call_local_llm_stream(messages)
+            elif provider == "openai":
+                # 使用OpenAI API流式调用
+                return self._call_openai_api_stream(messages)
+            elif provider == "deepseek":
+                # 使用DeepSeek API流式调用
+                return self._call_deepseek_api_stream(messages)
+            elif provider == "gemini":
+                # 使用Gemini API流式调用
+                return self._call_gemini_api_stream(messages)
+            else:
+                self.logger.error(f"未知的模型提供商: {provider}")
+                return "错误：未知的模型提供商配置。请检查settings.py中的MODEL_PROVIDER设置。"
+                
+        except Exception as e:
+            self.logger.error(f"LLM流式调用失败: {e}")
             return f"抱歉，无法完成请求。错误: {str(e)}"
 
     def _call_local_llm(self, messages):
@@ -206,6 +308,59 @@ class DialogueEngine:
             self.logger.error(f"本地LLM API请求失败: {e}")
             return "抱歉，我暂时无法连接到我的大脑，请检查服务是否已启动。"
 
+    def _call_local_llm_stream(self, messages):
+        """调用本地LLM API流式接口"""
+        try:
+            request_data = {
+                "model": getattr(settings, "LLM_MODEL", "local-model"),
+                "messages": messages,
+                "temperature": getattr(settings, "LLM_TEMPERATURE", 0.7),
+                "max_tokens": getattr(settings, "LLM_MAX_NEW_TOKENS", 1024),
+                "stream": True  # 启用流式输出
+            }
+
+            headers = {
+                "Content-Type": "application/json"
+            }
+
+            response = requests.post(
+                settings.LLM_API_URL,
+                json=request_data,
+                headers=headers,
+                timeout=60,
+                stream=True  # 启用流式响应
+            )
+            response.raise_for_status()
+
+            full_response = ""
+            print("🤖 AI: ", end="", flush=True)
+            
+            for line in response.iter_lines():
+                if line:
+                    line = line.decode('utf-8')
+                    if line.startswith('data: '):
+                        data = line[6:]  # 去掉 'data: ' 前缀
+                        if data == '[DONE]':
+                            break
+                        try:
+                            json_data = json.loads(data)
+                            if 'choices' in json_data and len(json_data['choices']) > 0:
+                                choice = json_data['choices'][0]
+                                if 'delta' in choice and 'content' in choice['delta']:
+                                    content = choice['delta']['content']
+                                    if content:
+                                        print(content, end="", flush=True)
+                                        full_response += content
+                        except json.JSONDecodeError:
+                            continue
+            
+            print()  # 换行
+            return full_response.strip()
+
+        except requests.RequestException as e:
+            self.logger.error(f"本地LLM流式API请求失败: {e}")
+            return "抱歉，我暂时无法连接到我的大脑，请检查服务是否已启动。"
+
     def _call_openai_api(self, messages):
         """调用OpenAI API"""
         if not hasattr(settings, 'OPENAI_API_KEY') or not settings.OPENAI_API_KEY:
@@ -235,6 +390,39 @@ class DialogueEngine:
         return reply
 
 
+    def _call_openai_api_stream(self, messages):
+        """调用OpenAI API流式接口"""
+        if not hasattr(settings, 'OPENAI_API_KEY') or not settings.OPENAI_API_KEY:
+            raise ValueError("未配置OpenAI API密钥。请在settings.py中设置OPENAI_API_KEY。")
+            
+        import openai
+        openai.api_key = settings.OPENAI_API_KEY
+
+        # 设置自定义基础URL（如果有）
+        if hasattr(settings, 'OPENAI_API_BASE') and settings.OPENAI_API_BASE:
+            openai.base_url = settings.OPENAI_API_BASE
+
+        # 调用流式API
+        response = openai.chat.completions.create(
+            model=getattr(settings, "OPENAI_MODEL", "gpt-3.5-turbo"),
+            messages=messages,
+            temperature=getattr(settings, "LLM_TEMPERATURE", 0.7),
+            max_tokens=getattr(settings, "LLM_MAX_NEW_TOKENS", 1024),
+            stream=True  # 启用流式输出
+        )
+        
+        full_response = ""
+        print("🤖 AI: ", end="", flush=True)
+        
+        for chunk in response:
+            if chunk.choices[0].delta.content is not None:
+                content = chunk.choices[0].delta.content
+                print(content, end="", flush=True)
+                full_response += content
+        
+        print()  # 换行
+        return full_response.strip()
+
     def _call_deepseek_api(self, messages):
         """调用DeepSeek API"""
         if not hasattr(settings, 'DEEPSEEK_API_KEY') or not settings.DEEPSEEK_API_KEY:
@@ -260,6 +448,37 @@ class DialogueEngine:
             return "抱歉，我无法生成回复。"
         reply = content.strip()
         return reply
+
+    def _call_deepseek_api_stream(self, messages):
+        """调用DeepSeek API流式接口"""
+        if not hasattr(settings, 'DEEPSEEK_API_KEY') or not settings.DEEPSEEK_API_KEY:
+            raise ValueError("未配置DeepSeek API密钥。请在settings.py中设置DEEPSEEK_API_KEY。")
+        
+        import openai
+        openai.api_key = settings.DEEPSEEK_API_KEY
+
+        if hasattr(settings, 'DEEPSEEK_API_BASE') and settings.DEEPSEEK_API_BASE:
+            openai.base_url = settings.DEEPSEEK_API_BASE
+
+        response = openai.chat.completions.create(
+            model=getattr(settings, "DEEPSEEK_MODEL", "deepseek-chat"),
+            messages=messages,
+            temperature=getattr(settings, "LLM_TEMPERATURE", 0.7),
+            max_tokens=getattr(settings, "LLM_MAX_NEW_TOKENS", 1024),
+            stream=True  # 启用流式输出
+        )
+
+        full_response = ""
+        print("🤖 AI: ", end="", flush=True)
+        
+        for chunk in response:
+            if chunk.choices[0].delta.content is not None:
+                content = chunk.choices[0].delta.content
+                print(content, end="", flush=True)
+                full_response += content
+        
+        print()  # 换行
+        return full_response.strip()
 
     # ------------------ 以下是被完全修正的 Gemini 相关方法 ------------------
 
@@ -399,6 +618,80 @@ class DialogueEngine:
         except Exception as e:
             self.logger.error(f"Gemini SDK 调用异常: {e}")
             return f"抱歉，处理Gemini请求时出现错误: {str(e)}"
+
+    def _call_gemini_api_stream(self, messages):
+        """
+        调用Gemini API并以流式返回响应（使用官方SDK）。
+        这是一个生成器函数，会逐块 yield 响应文本。
+        """
+        if not hasattr(settings, 'GEMINI_API_KEY') or not settings.GEMINI_API_KEY:
+            # 对于生成器，我们可以yield一个错误信息而不是raise异常
+            # 这样调用方可以在UI上显示错误
+            yield "[ERROR] 未配置Gemini API密钥。请在settings.py中设置GEMINI_API_KEY。"
+            return # 必须return来结束生成器
+
+        # 您现有的所有配置和初始化代码都可以复用
+        try:
+            # 关键步骤：处理代理配置
+            api_endpoint = None
+            if hasattr(settings, 'GEMINI_API_BASE') and settings.GEMINI_API_BASE:
+                from urllib.parse import urlparse
+                api_endpoint = urlparse(settings.GEMINI_API_BASE).netloc
+            
+            client_opts = client_options.ClientOptions(api_endpoint=api_endpoint) if api_endpoint else None
+            
+            # 1. 配置API Key和客户端选项（包含代理）
+            genai.configure(
+                api_key=settings.GEMINI_API_KEY,
+                transport="rest", # 明确使用rest传输以应用代理
+                client_options=client_opts
+            )
+            
+            # 2. 转换消息格式
+            system_instruction, gemini_contents = self._convert_messages_to_gemini_format(messages)
+
+            # 3. 设置生成参数
+            generation_config = genai.types.GenerationConfig(
+                temperature=getattr(settings, "LLM_TEMPERATURE", 0.7),
+                max_output_tokens=getattr(settings, "LLM_MAX_NEW_TOKENS", 2048),
+                top_p=0.8,
+                top_k=10
+            )
+            
+            # 4. 设置安全设置
+            safety_settings = [
+                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+            ]
+
+            # 5. 初始化模型
+            model = genai.GenerativeModel(
+                model_name=getattr(settings, "GEMINI_MODEL", "gemini-1.5-pro-latest"),
+                generation_config=generation_config,
+                system_instruction=system_instruction,
+                safety_settings=safety_settings
+            )
+
+            self.logger.debug(f"Gemini SDK [STREAM] 请求内容: {gemini_contents}")
+            
+            # 6. 发送流式请求 (核心变化)
+            response_stream = model.generate_content(
+                gemini_contents,
+                stream=True  # <--- ✨ 开启流式模式！
+            )
+            
+            # 7. 循环处理数据流并 yield 每一块文本 (核心变化)
+            for chunk in response_stream:
+                # 安全地获取文本块，防止因奇怪的响应（如只有finish_reason）而报错
+                if chunk.text:
+                    yield chunk.text # <--- ✨ 使用yield而不是return
+
+        except Exception as e:
+            self.logger.error(f"Gemini SDK [STREAM] 调用异常: {e}")
+            # 在生成器中，通过yield返回错误信息是更好的方式
+            yield f"\n[ERROR] 抱歉，处理Gemini流式请求时出现错误: {str(e)}"
     
     def _convert_messages_to_gemini_format(self, messages):
         """
