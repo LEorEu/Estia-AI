@@ -232,13 +232,9 @@ class EstiaApp:
         try:
             # 使用对话引擎的流式方法
             if self.dialogue_engine:
-                prompt = f"请基于以下信息回答用户的问题或请求。\n\n{enhanced_context}\n\n用户请求: {query}\n\n请基于上述信息给出回复:"
-                
-                response_generator = self.dialogue_engine._get_llm_response_stream(
-                    prompt,
-                    [],
-                    ""
-                )
+                # enhanced_context已经由ContextLengthManager构建了完整的对话上下文
+                # 包括角色设定、记忆格式化、用户输入和回复指导，无需再次包装
+                response_generator = self.dialogue_engine._call_llm_with_context_stream(enhanced_context)
                 
                 for chunk in response_generator:
                     yield chunk
@@ -256,13 +252,9 @@ class EstiaApp:
             
             # 获取文本生成器
             if self.dialogue_engine:
-                prompt = f"请基于以下信息回答用户的问题或请求。\n\n{enhanced_context}\n\n用户请求: {query}\n\n请基于上述信息给出回复:"
-                
-                response_generator = self.dialogue_engine._get_llm_response_stream(
-                    prompt,
-                    [],
-                    ""
-                )
+                # enhanced_context已经由ContextLengthManager构建了完整的对话上下文
+                # 包括角色设定、记忆格式化、用户输入和回复指导，无需再次包装
+                response_generator = self.dialogue_engine._call_llm_with_context_stream(enhanced_context)
                 
                 # 收集完整回复并进行语音输出
                 full_response = ""
@@ -292,13 +284,9 @@ class EstiaApp:
             
             # 获取文本生成器
             if self.dialogue_engine:
-                prompt = f"请基于以下信息回答用户的问题或请求。\n\n{enhanced_context}\n\n用户请求: {query}\n\n请基于上述信息给出回复:"
-                
-                response_generator = self.dialogue_engine._get_llm_response_stream(
-                    prompt,
-                    [],
-                    ""
-                )
+                # enhanced_context已经由ContextLengthManager构建了完整的对话上下文
+                # 包括角色设定、记忆格式化、用户输入和回复指导，无需再次包装
+                response_generator = self.dialogue_engine._call_llm_with_context_stream(enhanced_context)
                 
                 # 收集所有文本块
                 response_chunks = []
@@ -544,6 +532,9 @@ class EstiaApp:
                 
                 print(f"\n   ⚡ 响应时间: {query_time*1000:.2f}ms")
                 
+            except EOFError:
+                print("\n\n👋 输入结束，正在退出...")
+                break
             except KeyboardInterrupt:
                 print("\n\n👋 检测到中断信号，正在退出...")
                 break

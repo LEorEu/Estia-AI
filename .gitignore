@@ -94,9 +94,13 @@ summer/
 config/api_keys.py
 config/secrets.py
 config/local_settings.py
+config/env_local.ps1
 
 #开发计划
 development_plan/
 
 .claude/
 test_result/
+
+run_claude.bat
+run_claude.ps1

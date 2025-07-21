@@ -33,6 +33,7 @@ class ContextLengthManager:
         self.preset = preset or MEMORY_CONTEXT_PRESET
         self.limits = self._load_preset_config()
         self.adaptive_config = MEMORY_CONTEXT_ADAPTIVE
+        self.logger = logger  # 添加logger实例引用
         
         logger.debug(f"上下文长度管理器初始化完成，使用预设: {self.preset}")
     
@@ -178,19 +179,43 @@ class ContextLengthManager:
         
         return "\n".join(formatted_parts)
     
+    def _format_response_guidance(self, has_memories: bool = True) -> List[str]:
+        """格式化回复指导原则（从DialogueGenerationPrompts读取）"""
+        try:
+            from core.prompts.dialogue_generation import DialogueGenerationPrompts
+            return DialogueGenerationPrompts.get_response_guidance_list(has_memories)
+        except ImportError as e:
+            # 降级方案：使用简单的默认指导
+            self.logger.warning(f"无法导入DialogueGenerationPrompts，使用默认指导: {e}")
+            if has_memories:
+                return [
+                    "请基于以上记忆和历史对话回复：",
+                    "",
+                    "请直接给出回复："
+                ]
+            else:
+                return [
+                    "请回答用户的问题：",
+                    "",
+                    "请直接给出回复："
+                ]
+    
     def build_enhanced_context(self, 
                              user_input: str,
                              memories: List[Dict[str, Any]],
                              historical_context: Dict[str, Any],
                              current_session_id: Optional[str] = None,
-                             current_session_dialogues: Optional[List[Dict[str, Any]]] = None) -> str:
+                             current_session_dialogues: Optional[List[Dict[str, Any]]] = None,
+                             persona_name: Optional[str] = None) -> str:
         """构建增强上下文"""
         context_parts = []
         current_length = 0
         
-        # 1. 角色设定（固定，最高优先级）
+        # 1. 角色设定（支持可选的persona）
         role_limit = self.get_section_limit("role_setting")
-        role_setting = get_role_setting_for_context()
+        # 使用传入的persona_name，默认为"estia"
+        selected_persona = persona_name or "estia"
+        role_setting = get_role_setting_for_context(selected_persona)
         
         context_parts.append(role_setting)
         current_length += len(role_setting)
@@ -248,9 +273,14 @@ class ContextLengthManager:
         # 7. 当前用户输入
         context_parts.append(f"[当前输入] {user_input}")
         context_parts.append("")
-        context_parts.append("请基于以上记忆和历史对话，给出自然、连贯的回复：")
         
-        # 8. 自适应长度调整
+        # 8. 回复指导原则（整合自DialogueGenerationPrompts的优质指导）
+        has_meaningful_memories = any([core_memories_text, relevant_memories_text, 
+                                     session_dialogues, all_summaries])
+        guidance_parts = self._format_response_guidance(has_meaningful_memories)
+        context_parts.extend(guidance_parts)
+        
+        # 9. 自适应长度调整
         if self.adaptive_config.get("enabled", True):
             final_context = self._adaptive_length_adjustment(context_parts, current_length)
         else:

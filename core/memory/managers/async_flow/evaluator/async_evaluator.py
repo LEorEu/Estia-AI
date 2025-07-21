@@ -167,7 +167,8 @@ class AsyncMemoryEvaluator:
             )
 
             start_time = time.time()
-            response = self.dialogue_engine._get_llm_response(evaluation_prompt)
+            # 使用优化后的方法：evaluation_prompt已经是完整构建的上下文
+            response = self.dialogue_engine._call_llm_with_context(evaluation_prompt)
             evaluation_time = time.time() - start_time
             
             self.logger.info(f"LLM评估耗时: {evaluation_time*1000:.2f}ms")

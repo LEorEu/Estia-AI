@@ -86,13 +86,13 @@ class DialogueEngine:
         if memory_context:
             # memory_context 已经是 ContextLengthManager 构建的完整上下文
             # 包含：角色设定、当前会话、核心记忆、历史对话、相关记忆、重要总结、用户输入
-            full_prompt = memory_context
+            complete_context = memory_context
         else:
             # 降级方案：没有上下文时使用基础模板
-            full_prompt = get_fallback_prompt(user_query)
+            complete_context = get_fallback_prompt(user_query)
 
-        # 直接调用LLM，不进行二次包装
-        response = self._get_llm_response(full_prompt)
+        # 直接调用优化后的LLM接口
+        response = self._call_llm_with_context(complete_context)
         return response
         
     def generate_response_stream(self, user_query, memory_context=None):
@@ -110,62 +110,54 @@ class DialogueEngine:
         if memory_context:
             # memory_context 已经是 ContextLengthManager 构建的完整上下文
             # 包含：角色设定、当前会话、核心记忆、历史对话、相关记忆、重要总结、用户输入
-            full_prompt = memory_context
+            complete_context = memory_context
         else:
             # 降级方案：没有上下文时使用基础模板
-            full_prompt = get_fallback_prompt(user_query)
+            complete_context = get_fallback_prompt(user_query)
 
-        # 直接调用LLM流式生成，不进行二次包装
-        return self._get_llm_response_stream(full_prompt)
+        # 直接调用优化后的LLM流式接口
+        return self._call_llm_with_context_stream(complete_context)
         
-    def _get_llm_response(self, prompt, history=None, personality=""):
+    def _call_llm_with_context(self, complete_context):
         """
-        使用大语言模型生成回复
+        使用完整上下文调用LLM (优化后的方法)
         
         参数:
-            prompt: 提示文本（可以是完整的上下文或简单提示）
-            history: 历史对话 (可选，用于兼容性)
-            personality: 人格设定 (可选，用于兼容性)
+            complete_context: 完整的上下文文本 (已由ContextLengthManager或MemoryEvaluationPrompts构建)
         
         返回:
             模型生成的回复
         """
-        if history is None:
-            history = []
+        # 直接构建用户消息，不做复杂的二次包装
+        messages = [{"role": "user", "content": complete_context}]
         
-        # 构建消息数组
-        messages = []
+        return self._call_llm_api(messages)
         
-        # 添加人格设定 (如果有)
-        if personality:
-            messages.append({
-                "role": "system",
-                "content": personality
-            })
+    def _call_llm_with_context_stream(self, complete_context):
+        """
+        使用完整上下文调用LLM流式接口 (优化后的方法)
         
-        # 添加历史对话
-        for entry in history:
-            messages.append({
-                "role": entry.get("role", "user"),
-                "content": entry.get("content", "")
-            })
+        参数:
+            complete_context: 完整的上下文文本
         
-        # 添加当前提示
-        # 如果 prompt 已经是完整的上下文（包含角色设定等），直接使用
-        # 否则作为用户消息处理
-        if prompt.strip().startswith(('[系统角色设定]', get_estia_persona()[:10], '[角色设定]')) or len(prompt) > 500:
-            # 这是一个完整的上下文，直接作为用户消息发送
-            messages.append({
-                "role": "user", 
-                "content": prompt
-            })
-        else:
-            # 这是一个简单的提示或评估请求
-            messages.append({
-                "role": "user",
-                "content": prompt
-            })
+        返回:
+            模型生成的完整回复
+        """
+        # 直接构建用户消息，不做复杂的二次包装
+        messages = [{"role": "user", "content": complete_context}]
         
+        return self._call_llm_api_stream(messages)
+    
+    def _call_llm_api(self, messages):
+        """
+        统一的LLM API调用方法
+        
+        参数:
+            messages: 消息数组
+        
+        返回:
+            LLM响应结果
+        """
         # 根据提供商选择适当的API调用方法
         provider = settings.MODEL_PROVIDER.lower()
         
@@ -174,16 +166,12 @@ class DialogueEngine:
             self.logger.debug(f"使用{provider}提供商发送请求，消息数: {len(messages)}")
             
             if provider == "local":
-                # 使用本地LLM API
                 return self._call_local_llm(messages)
             elif provider == "openai":
-                # 使用OpenAI API
                 return self._call_openai_api(messages)
             elif provider == "deepseek":
-                # 使用DeepSeek API
                 return self._call_deepseek_api(messages)
             elif provider == "gemini":
-                # 使用Gemini API
                 return self._call_gemini_api(messages)
             else:
                 self.logger.error(f"未知的模型提供商: {provider}")
@@ -192,23 +180,114 @@ class DialogueEngine:
         except Exception as e:
             self.logger.error(f"LLM调用失败: {e}")
             return f"抱歉，无法完成请求。错误: {str(e)}"
-
-    def _get_llm_response_stream(self, prompt, history=None, personality=""):
+            
+    def _call_llm_api_stream(self, messages):
         """
-        使用大语言模型流式生成回复
+        统一的LLM API流式调用方法
+        
+        参数:
+            messages: 消息数组
+        
+        返回:
+            LLM响应生成器
+        """
+        # 根据提供商选择适当的流式API调用方法
+        provider = settings.MODEL_PROVIDER.lower()
+        
+        # 请求LLM流式响应
+        try:
+            self.logger.debug(f"使用{provider}提供商发送流式请求，消息数: {len(messages)}")
+            
+            if provider == "local":
+                return self._call_local_llm_stream(messages)
+            elif provider == "openai":
+                return self._call_openai_api_stream(messages)
+            elif provider == "deepseek":
+                return self._call_deepseek_api_stream(messages)
+            elif provider == "gemini":
+                return self._call_gemini_api_stream(messages)
+            else:
+                self.logger.error(f"未知的模型提供商: {provider}")
+                return "错误：未知的模型提供商配置。请检查settings.py中的MODEL_PROVIDER设置。"
+                
+        except Exception as e:
+            self.logger.error(f"LLM流式调用失败: {e}")
+            return f"抱歉，无法完成请求。错误: {str(e)}"
+
+    def _get_llm_response(self, prompt, history=None, personality=""):
+        """
+        传统LLM响应方法 (向后兼容)
+        
+        注意: 这个方法保留用于向后兼容，但建议使用 _call_llm_with_context() 方法
+        新的调用方式应该直接传递已构建好的完整上下文
         
         参数:
             prompt: 提示文本（可以是完整的上下文或简单提示）
-            history: 历史对话 (可选，用于兼容性)
-            personality: 人格设定 (可选，用于兼容性)
+            history: 历史对话 (兼容参数，大多数情况下为空)
+            personality: 人格设定 (兼容参数，大多数情况下为空)
         
         返回:
-            模型生成的完整回复
+            模型生成的回复
+        """
+        # 检测是否为新的调用方式（已构建完整上下文）
+        if self._is_complete_context(prompt) and not history and not personality:
+            # 新的调用方式：直接传递完整上下文
+            return self._call_llm_with_context(prompt)
+        else:
+            # 旧的兼容方式：构建消息数组
+            messages = self._build_messages_legacy(prompt, history, personality)
+            return self._call_llm_api(messages)
+    
+    def _is_complete_context(self, prompt):
+        """
+        智能检测是否为完整上下文
+        
+        参数:
+            prompt: 提示文本
+        
+        返回:
+            bool: True表示是完整上下文
+        """
+        # 检测关键标识符
+        context_indicators = [
+            '[\u7cfb\u7edf\u89d2\u8272\u8bbe\u5b9a]',  # 系统角色设定
+            '[\u89d2\u8272\u8bbe\u5b9a]',          # 角色设定
+            '[\u5f53\u524d\u4f1a\u8bdd]',          # 当前会话
+            '[\u6838\u5fc3\u8bb0\u5fc6]',          # 核心记忆
+            '[\u5386\u53f2\u5bf9\u8bdd]',          # 历史对话
+            '[\u76f8\u5173\u8bb0\u5fc6]',          # 相关记忆
+            '\u8bf7\u5bf9\u4ee5\u4e0b\u5bf9\u8bdd\u8fdb\u884c',   # 评估提示词的开始
+            get_estia_persona()[:20]      # Estia人格前20字符
+        ]
+        
+        prompt_text = prompt.strip()
+        
+        # 检测是否包含关键标识符
+        for indicator in context_indicators:
+            if indicator in prompt_text:
+                return True
+                
+        # 检测长度（完整上下文通常较长）
+        if len(prompt_text) > 800:  # 更合理的阈值
+            return True
+            
+        return False
+    
+    def _build_messages_legacy(self, prompt, history, personality):
+        """
+        构建传统格式的消息数组 (用于向后兼容)
+        
+        参数:
+            prompt: 提示文本
+            history: 历史对话列表
+            personality: 人格设定
+        
+        返回:
+            list: 消息数组
         """
         if history is None:
             history = []
-        
-        # 构建消息数组
+            
         messages = []
         
         # 添加人格设定 (如果有)
@@ -226,47 +305,35 @@ class DialogueEngine:
             })
         
         # 添加当前提示
-        # 如果 prompt 已经是完整的上下文（包含角色设定等），直接使用
-        # 否则作为用户消息处理
-        if prompt.strip().startswith(('[系统角色设定]', get_estia_persona()[:10], '[角色设定]')) or len(prompt) > 500:
-            # 这是一个完整的上下文，直接作为用户消息发送
-            messages.append({
-                "role": "user", 
-                "content": prompt
-            })
+        messages.append({
+            "role": "user",
+            "content": prompt
+        })
+        
+        return messages
+
+    def _get_llm_response_stream(self, prompt, history=None, personality=""):
+        """
+        传统流式LLM响应方法 (向后兼容)
+        
+        注意: 这个方法保留用于向后兼容，但建议使用 _call_llm_with_context_stream() 方法
+        
+        参数:
+            prompt: 提示文本（可以是完整的上下文或简单提示）
+            history: 历史对话 (兼容参数，大多数情况下为空)
+            personality: 人格设定 (兼容参数，大多数情况下为空)
+        
+        返回:
+            模型生成的完整回复
+        """
+        # 检测是否为新的调用方式（已构建完整上下文）
+        if self._is_complete_context(prompt) and not history and not personality:
+            # 新的调用方式：直接传递完整上下文
+            return self._call_llm_with_context_stream(prompt)
         else:
-            # 这是一个简单的提示或评估请求
-            messages.append({
-                "role": "user",
-                "content": prompt
-            })
-        
-        # 根据提供商选择适当的流式API调用方法
-        provider = settings.MODEL_PROVIDER.lower()
-        
-        # 请求LLM流式响应
-        try:
-            self.logger.debug(f"使用{provider}提供商发送流式请求，消息数: {len(messages)}")
-            
-            if provider == "local":
-                # 使用本地LLM API流式调用
-                return self._call_local_llm_stream(messages)
-            elif provider == "openai":
-                # 使用OpenAI API流式调用
-                return self._call_openai_api_stream(messages)
-            elif provider == "deepseek":
-                # 使用DeepSeek API流式调用
-                return self._call_deepseek_api_stream(messages)
-            elif provider == "gemini":
-                # 使用Gemini API流式调用
-                return self._call_gemini_api_stream(messages)
-            else:
-                self.logger.error(f"未知的模型提供商: {provider}")
-                return "错误：未知的模型提供商配置。请检查settings.py中的MODEL_PROVIDER设置。"
-                
-        except Exception as e:
-            self.logger.error(f"LLM流式调用失败: {e}")
-            return f"抱歉，无法完成请求。错误: {str(e)}"
+            # 旧的兼容方式：构建消息数组
+            messages = self._build_messages_legacy(prompt, history, personality)
+            return self._call_llm_api_stream(messages)
 
     def _call_local_llm(self, messages):
         """调用本地LLM API（兼容 OpenAI 接口）"""
@@ -750,6 +817,9 @@ class DialogueEngine:
 def get_llm_response(prompt, history=None, personality=""):
     """
     使用大语言模型生成回复 (兼容旧版)
+    
+    注意: 这是为了向后兼容性而保留的接口
+    新代码应该直接使用 DialogueEngine().generate_response()
     """
     engine = DialogueEngine()
     return engine._get_llm_response(prompt, history, personality)

@@ -67,7 +67,7 @@ LOG_LEVEL = "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
 
 # 人格设定 ---
 # 在这里选择你想让AI扮演的角色，只需要修改这里的名字即可
-ACTIVE_PERSONA = "witty_friend" 
+ACTIVE_PERSONA = "estia" 
 
 # --- 音频控制设置 ---
 # 录音热键设置 (使用键码名称，如F1-F12, a-z, 0-9等)

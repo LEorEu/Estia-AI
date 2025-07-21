@@ -16,6 +16,12 @@ import argparse
 import logging
 from datetime import datetime
 
+# 设置控制台编码为UTF-8
+if sys.platform == 'win32':
+    import codecs
+    sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer)
+    sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer)
+
 # 配置日志
 from config import settings
 
@@ -96,6 +102,12 @@ def main():
     
     # 解析命令行参数
     args = parse_arguments()
+    
+    # 根据交互模式和命令行参数更新流式输出配置
+    if args.mode == "text":
+        # 文本模式下默认禁用音频流
+        if not (args.stream or args.audio_stream):
+            settings.ENABLE_AUDIO_STREAM = False
     
     # 根据命令行参数更新流式输出配置
     if args.no_stream:

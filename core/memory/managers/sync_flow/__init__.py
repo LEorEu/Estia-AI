@@ -326,12 +326,26 @@ class SyncFlowManager(ErrorHandlerMixin):
             
             # 使用上下文长度管理器构建基础上下文
             if self.context_manager:
+                # 获取persona名称：用户设置 > 全局配置 > 默认estia
+                persona_name = None
+                if context:
+                    persona_name = context.get('persona_name')
+                
+                # 如果用户没有指定，使用全局配置
+                if not persona_name:
+                    try:
+                        from config.settings import ACTIVE_PERSONA
+                        persona_name = ACTIVE_PERSONA
+                    except ImportError:
+                        persona_name = "estia"  # 默认fallback
+                
                 base_context = self.context_manager.build_enhanced_context(
                     user_input=user_input,
                     memories=ranked_memories,
                     historical_context=historical_context,
                     current_session_id=current_session_id,
-                    current_session_dialogues=current_session_dialogues
+                    current_session_dialogues=current_session_dialogues,
+                    persona_name=persona_name
                 )
                 
                 # 🆕 添加分层统计信息到上下文
