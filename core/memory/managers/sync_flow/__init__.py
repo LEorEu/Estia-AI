@@ -108,6 +108,7 @@ class SyncFlowManager(ErrorHandlerMixin):
                 'enhanced_context': enhanced_context,
                 'ranked_memories': ranked_memories,
                 'historical_context': historical_context,
+                'context_memories': context_memories,  # 🔧 添加context_memories
                 'processing_time': total_time,
                 'step_times': self.step_times.copy(),
                 'success': True
@@ -548,6 +549,7 @@ class SyncFlowManager(ErrorHandlerMixin):
             'enhanced_context': fallback_context,
             'ranked_memories': [],
             'historical_context': {},
+            'context_memories': [],  # 🔧 添加空的context_memories
             'processing_time': 0.0,
             'step_times': {},
             'success': False,

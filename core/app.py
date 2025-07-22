@@ -30,6 +30,10 @@ class EstiaApp:
         self.is_initialized = False
         self._async_initialized = False
         
+        # 🔧 添加session管理
+        self.current_session_id = None
+        self.session_context = None
+        
         # 启动时预加载所有组件
         self._initialize_system()
         
@@ -161,6 +165,23 @@ class EstiaApp:
         except Exception as e:
             self.logger.warning(f"系统预热失败: {e}")
             # 预热失败不影响系统正常运行
+    
+    def get_or_create_session_id(self):
+        """获取或创建session ID"""
+        if self.current_session_id is None:
+            import uuid
+            self.current_session_id = f"session_{uuid.uuid4().hex[:8]}"
+            self.logger.debug(f"创建新session: {self.current_session_id}")
+        return self.current_session_id
+    
+    def get_session_context(self):
+        """获取session上下文"""
+        if self.session_context is None:
+            self.session_context = {
+                'session_id': self.get_or_create_session_id(),
+                'context_memories': []  # 将在查询增强时填充
+            }
+        return self.session_context
         
     def process_query_stream(self, query, context=None):
         """
@@ -180,13 +201,30 @@ class EstiaApp:
         full_response = ""
         
         try:
+            # 🔧 确保context包含session信息
+            if context is None:
+                context = self.get_session_context()
+            else:
+                # 补充必要的session信息
+                if 'session_id' not in context:
+                    context['session_id'] = self.get_or_create_session_id()
+                if 'context_memories' not in context:
+                    context['context_memories'] = []
+            
             # 使用记忆系统增强查询
             self.logger.debug(f"开始流式处理查询: {query[:50]}...")
             
-            enhanced_context = self.memory.enhance_query(query, context)
+            # 🔧 获取完整的同步流程结果，包括context_memories
+            sync_result = self.memory.sync_flow_manager.execute_sync_flow(query, context)
+            enhanced_context = sync_result.get('enhanced_context', '')
+            context_memories = sync_result.get('context_memories', [])
+            
+            # 🔧 更新context以包含context_memories
+            context['context_memories'] = context_memories
+            
             enhance_time = time.time() - start_time
             
-            self.logger.debug(f"记忆增强完成，耗时: {enhance_time*1000:.2f}ms，上下文长度: {len(enhanced_context)}")
+            self.logger.debug(f"记忆增强完成，耗时: {enhance_time*1000:.2f}ms，上下文长度: {len(enhanced_context)}，记忆数: {len(context_memories)}")
             
             # 使用对话引擎流式生成回复
             response_start = time.time()
@@ -344,13 +382,30 @@ class EstiaApp:
         start_time = time.time()
         
         try:
+            # 🔧 确保context包含session信息
+            if context is None:
+                context = self.get_session_context()
+            else:
+                # 补充必要的session信息
+                if 'session_id' not in context:
+                    context['session_id'] = self.get_or_create_session_id()
+                if 'context_memories' not in context:
+                    context['context_memories'] = []
+            
             # 使用记忆系统增强查询
             self.logger.debug(f"开始处理查询: {query[:50]}...")
             
-            enhanced_context = self.memory.enhance_query(query, context)
+            # 🔧 获取完整的同步流程结果，包括context_memories
+            sync_result = self.memory.sync_flow_manager.execute_sync_flow(query, context)
+            enhanced_context = sync_result.get('enhanced_context', '')
+            context_memories = sync_result.get('context_memories', [])
+            
+            # 🔧 更新context以包含context_memories
+            context['context_memories'] = context_memories
+            
             enhance_time = time.time() - start_time
             
-            self.logger.debug(f"记忆增强完成，耗时: {enhance_time*1000:.2f}ms，上下文长度: {len(enhanced_context)}")
+            self.logger.debug(f"记忆增强完成，耗时: {enhance_time*1000:.2f}ms，上下文长度: {len(enhanced_context)}，记忆数: {len(context_memories)}")
             
             # 使用对话引擎生成回复
             response_start = time.time()
@@ -513,7 +568,9 @@ class EstiaApp:
                     full_response = ""
                     
                     try:
-                        for chunk in self.process_query_stream(user_input):
+                        # 🔧 传递session上下文
+                        session_context = self.get_session_context()
+                        for chunk in self.process_query_stream(user_input, session_context):
                             print(chunk, end="", flush=True)
                             full_response += chunk
                     except Exception as e:
@@ -523,7 +580,9 @@ class EstiaApp:
                         print(response)
                         full_response = response
                 else:
-                    response = self.process_query(user_input)
+                    # 🔧 传递session上下文
+                    session_context = self.get_session_context()
+                    response = self.process_query(user_input, session_context)
                     print(f"\n🤖 Estia: {response}")
                     full_response = response
                 
