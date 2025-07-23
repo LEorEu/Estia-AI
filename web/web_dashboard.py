@@ -21,9 +21,10 @@ from functools import lru_cache
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 
-from flask import Flask, render_template, jsonify, request, send_from_directory
+from flask import Flask, render_template, jsonify, request, send_from_directory, send_file
 from flask_socketio import SocketIO, emit
 import threading
+import os
 
 # 导入监控系统
 from core.memory.managers.monitor_flow.monitoring import (
@@ -36,9 +37,26 @@ from core.memory.managers.monitor_flow.monitoring import (
 # 导入实时数据连接器
 from .live_data_connector import live_connector
 
-app = Flask(__name__, template_folder='../templates')
+# 导入新的监控系统集成
+from .monitoring_integration import (
+    initialize_monitoring_system, 
+    get_monitoring_system,
+    enhance_dashboard_data,
+    register_monitoring_routes,
+    monitoring_bp
+)
+
+# 配置Flask应用同时服务Vue前端
+vue_dist_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'web-vue', 'dist')
+app = Flask(__name__, 
+           template_folder=vue_dist_path,
+           static_folder=vue_dist_path,
+           static_url_path='')
 app.config['SECRET_KEY'] = 'estia_monitoring_secret'
 socketio = SocketIO(app, cors_allowed_origins="*")
+
+print(f"📁 Vue前端资源路径: {vue_dist_path}")
+print(f"📁 Vue前端资源存在: {os.path.exists(vue_dist_path)}")
 
 # 全局监控实例
 try:
@@ -193,6 +211,20 @@ class FallbackMonitor:
 if flow_monitor is None:
     flow_monitor = FallbackMonitor()
     print("🔄 启用降级监控模式")
+
+# 初始化新的监控系统集成
+enhanced_monitor = None
+try:
+    enhanced_monitor = initialize_monitoring_system()
+    if enhanced_monitor:
+        print("✅ 增强监控系统初始化成功")
+        # 注册监控API路由
+        register_monitoring_routes(app)
+    else:
+        print("⚠️ 增强监控系统初始化失败")
+except Exception as e:
+    print(f"❌ 增强监控系统初始化异常: {e}")
+    enhanced_monitor = None
 
 
 class KeywordAnalyzer:
@@ -540,22 +572,7 @@ class PerformanceOptimizer:
 performance_optimizer = PerformanceOptimizer()
 
 
-@app.route('/')
-def dashboard():
-    """主仪表板页面"""
-    return render_template('dashboard.html')
-
-
-@app.route('/simple')
-def simple_dashboard():
-    """简化版仪表板页面"""
-    return render_template('simple_dashboard.html')
-
-
-@app.route('/fixed')
-def fixed_dashboard():
-    """修复版仪表板页面"""
-    return render_template('dashboard_fixed.html')
+# 主页路由已在文件末尾定义（serve_vue_app函数）
 
 
 @app.route('/api/status')
@@ -717,6 +734,13 @@ def get_dashboard_data():
             result['memory'] = memory_data
         except Exception as e:
             result['memory'] = {'error': str(e)}
+
+        # 使用增强监控系统增强数据
+        try:
+            result = enhance_dashboard_data(result)
+            print("✅ 仪表板数据已增强")
+        except Exception as e:
+            print(f"⚠️ 数据增强失败: {e}")
 
         # 缓存结果
         performance_optimizer.data_cache.set('dashboard_batch', result)
@@ -969,9 +993,6 @@ def handle_start_monitoring():
     monitoring_thread.start()
 
 
-# 注意：现在使用独立的模板文件 templates/dashboard.html
-
-
 @app.route('/api/live_data')
 def get_live_data():
     """获取实时系统数据"""
@@ -1029,6 +1050,13 @@ def get_live_data():
                 }
             }
         }
+
+        # 使用增强监控系统增强实时数据
+        try:
+            dashboard_data = enhance_dashboard_data(dashboard_data)
+            print("✅ 实时数据已增强")
+        except Exception as e:
+            print(f"⚠️ 实时数据增强失败: {e}")
 
         return jsonify(dashboard_data)
 
@@ -1227,17 +1255,548 @@ def generate_test_data():
         })
 
 
+# =================================
+# 新增: Web监控重构API端点 (非侵入式)
+# =================================
+
+@app.route('/api/health')
+def api_health_check():
+    """API健康检查端点"""
+    return jsonify({
+        'status': 'ok',
+        'timestamp': datetime.now().isoformat(),
+        'monitor_available': monitor is not None,
+        'monitor_type': type(monitor).__name__ if monitor else 'None'
+    })
+
+@app.route('/api/session/<session_id>/context')
+def get_session_context(session_id: str):
+    """获取指定会话的完整上下文构建过程（非侵入式读取）"""
+    try:
+        # 安全地获取监控数据
+        if not monitor:
+            return jsonify({
+                'error': '监控系统未初始化',
+                'timestamp': datetime.now().isoformat()
+            }), 503
+            
+        # 从现有监控系统中读取数据
+        sessions = getattr(monitor, 'completed_sessions', [])
+        
+        # 查找指定会话
+        target_session = None
+        for session in sessions:
+            if hasattr(session, 'session_id') and session.session_id == session_id:
+                target_session = session
+                break
+        
+        if not target_session:
+            return jsonify({
+                'error': f'会话 {session_id} 未找到',
+                'available_sessions': [s.session_id for s in sessions if hasattr(s, 'session_id')]
+            }), 404
+        
+        # 提取上下文构建相关的步骤数据
+        context_data = {
+            'session_id': session_id,
+            'timestamp': datetime.now().isoformat(),
+            'preprocessing': {},
+            'memory_retrieval': {},
+            'history_aggregation': {},
+            'final_context': {}
+        }
+        
+        # 从监控数据中提取各步骤信息
+        for step, metrics in target_session.steps.items():
+            if step == MemoryPipelineStep.STEP_4_CACHE_VECTORIZE:
+                context_data['preprocessing'] = {
+                    'query_processed': metrics.metadata.get('query_text', ''),
+                    'keywords_extracted': metrics.metadata.get('keywords', []),
+                    'vector_dimension': metrics.metadata.get('vector_dim', 0),
+                    'processing_time': metrics.duration
+                }
+            
+            elif step == MemoryPipelineStep.STEP_5_FAISS_SEARCH:
+                context_data['memory_retrieval'] = {
+                    'retrieved_memories': metrics.metadata.get('memories', []),
+                    'similarity_scores': metrics.metadata.get('similarities', []),
+                    'retrieval_count': metrics.metadata.get('result_count', 0),
+                    'search_time': metrics.duration,
+                    'avg_similarity': metrics.metadata.get('avg_similarity', 0)
+                }
+            
+            elif step == MemoryPipelineStep.STEP_6_ASSOCIATION_EXPAND:
+                context_data['memory_retrieval']['associations'] = {
+                    'expanded_memories': metrics.metadata.get('expanded_memories', []),
+                    'association_count': metrics.metadata.get('expansion_count', 0),
+                    'association_strength': metrics.metadata.get('avg_strength', 0)
+                }
+            
+            elif step == MemoryPipelineStep.STEP_7_HISTORY_AGGREGATE:
+                context_data['history_aggregation'] = {
+                    'historical_dialogues': metrics.metadata.get('dialogues', []),
+                    'dialogue_count': metrics.metadata.get('dialogue_count', 0),
+                    'relevance_scores': metrics.metadata.get('relevance_scores', []),
+                    'aggregation_time': metrics.duration
+                }
+            
+            elif step == MemoryPipelineStep.STEP_9_CONTEXT_BUILD:
+                context_data['final_context'] = {
+                    'complete_context': metrics.metadata.get('final_context', ''),
+                    'context_length': metrics.metadata.get('context_length', 0),
+                    'token_count': metrics.metadata.get('token_count', 0),
+                    'memory_count': metrics.metadata.get('memory_used', 0),
+                    'build_time': metrics.duration,
+                    'context_structure': {
+                        'system_prompt': metrics.metadata.get('system_prompt', ''),
+                        'retrieved_memories': metrics.metadata.get('formatted_memories', []),
+                        'historical_context': metrics.metadata.get('historical_context', ''),
+                        'user_input': metrics.metadata.get('user_input', '')
+                    }
+                }
+        
+        return jsonify(context_data)
+        
+    except Exception as e:
+        return jsonify({
+            'error': f'获取会话上下文失败: {str(e)}',
+            'session_id': session_id,
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
+
+@app.route('/api/session/<session_id>/evaluation')
+def get_session_evaluation(session_id: str):
+    """获取指定会话的异步评估结果（非侵入式读取）"""
+    try:
+        # 安全地获取监控数据
+        if not monitor:
+            return jsonify({
+                'error': '监控系统未初始化',
+                'timestamp': datetime.now().isoformat()
+            }), 503
+            
+        # 从现有监控系统中读取评估数据
+        sessions = getattr(monitor, 'completed_sessions', [])
+        
+        target_session = None
+        for session in sessions:
+            if hasattr(session, 'session_id') and session.session_id == session_id:
+                target_session = session
+                break
+        
+        if not target_session:
+            return jsonify({'error': f'会话 {session_id} 未找到'}), 404
+        
+        evaluation_data = {
+            'session_id': session_id,
+            'timestamp': datetime.now().isoformat(),
+            'evaluation_context': {},
+            'evaluation_results': {},
+            'association_creation': {}
+        }
+        
+        # 提取异步评估相关数据
+        for step, metrics in target_session.steps.items():
+            if step == MemoryPipelineStep.STEP_12_ASYNC_EVALUATE:
+                evaluation_data['evaluation_context'] = {
+                    'user_input': metrics.metadata.get('user_input', ''),
+                    'assistant_response': metrics.metadata.get('assistant_response', ''),
+                    'evaluation_prompt': metrics.metadata.get('evaluation_prompt', ''),
+                    'model_used': metrics.metadata.get('model_used', ''),
+                    'evaluation_time': metrics.duration
+                }
+                
+                evaluation_data['evaluation_results'] = {
+                    'importance_score': metrics.metadata.get('importance_score', 0),
+                    'importance_reason': metrics.metadata.get('importance_reason', ''),
+                    'emotion_analysis': metrics.metadata.get('emotion_analysis', {}),
+                    'topic_tags': metrics.metadata.get('topic_tags', []),
+                    'knowledge_extracted': metrics.metadata.get('knowledge_extracted', []),
+                    'association_suggestions': metrics.metadata.get('association_suggestions', [])
+                }
+            
+            elif step == MemoryPipelineStep.STEP_14_CREATE_ASSOCIATIONS:
+                evaluation_data['association_creation'] = {
+                    'new_associations': metrics.metadata.get('new_associations', []),
+                    'association_count': metrics.metadata.get('association_count', 0),
+                    'association_types': metrics.metadata.get('association_types', []),
+                    'creation_time': metrics.duration
+                }
+        
+        return jsonify(evaluation_data)
+        
+    except Exception as e:
+        return jsonify({
+            'error': f'获取评估数据失败: {str(e)}',
+            'session_id': session_id,
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
+
+@app.route('/api/pipeline/status')
+def get_pipeline_status():
+    """获取15步流程的实时状态（非侵入式读取）"""
+    try:
+        # 安全地获取监控数据
+        if not monitor:
+            return jsonify({
+                'error': '监控系统未初始化',
+                'timestamp': datetime.now().isoformat()
+            }), 503
+            
+        # 获取当前正在执行和最近完成的会话
+        active_sessions = getattr(monitor, 'active_sessions', {})
+        completed_sessions = getattr(monitor, 'completed_sessions', [])
+        recent_sessions = completed_sessions[-5:] if completed_sessions else []
+        
+        pipeline_status = {
+            'timestamp': datetime.now().isoformat(),
+            'active_sessions': len(active_sessions),
+            'phase_status': {
+                'initialization': {'status': 'completed', 'progress': 100},
+                'query_enhancement': {'status': 'idle', 'progress': 0},
+                'storage_evaluation': {'status': 'idle', 'progress': 0}
+            },
+            'step_status': {},
+            'current_step': None,
+            'performance_metrics': {}
+        }
+        
+        # 如果有活跃会话，显示实时状态
+        if active_sessions:
+            current_session = next(iter(active_sessions.values()))
+            current_step = getattr(current_session, 'current_step', None)
+            pipeline_status['current_step'] = current_step.value if current_step else None
+            
+            # 更新阶段状态
+            if current_step:
+                if current_step.value.startswith('step_1') or current_step.value.startswith('step_2') or current_step.value.startswith('step_3'):
+                    pipeline_status['phase_status']['initialization']['status'] = 'running'
+                elif current_step.value.startswith('step_4') or current_step.value.startswith('step_5') or current_step.value.startswith('step_6') or current_step.value.startswith('step_7') or current_step.value.startswith('step_8') or current_step.value.startswith('step_9'):
+                    pipeline_status['phase_status']['query_enhancement']['status'] = 'running'
+                else:
+                    pipeline_status['phase_status']['storage_evaluation']['status'] = 'running'
+        
+        # 从最近会话中提取步骤状态统计
+        step_stats = defaultdict(list)
+        for session in recent_sessions:
+            for step, metrics in session.steps.items():
+                step_stats[step.value].append({
+                    'duration': metrics.duration,
+                    'status': metrics.status.value,
+                    'timestamp': metrics.start_time
+                })
+        
+        # 计算每个步骤的平均性能
+        for step_name, metrics_list in step_stats.items():
+            successful_metrics = [m for m in metrics_list if m['status'] == 'success']
+            if successful_metrics:
+                avg_duration = sum(m['duration'] for m in successful_metrics) / len(successful_metrics)
+                success_rate = len(successful_metrics) / len(metrics_list)
+                
+                pipeline_status['step_status'][step_name] = {
+                    'avg_duration': round(avg_duration, 3),
+                    'success_rate': round(success_rate, 2),
+                    'total_executions': len(metrics_list),
+                    'last_execution': max(m['timestamp'] for m in metrics_list)
+                }
+        
+        return jsonify(pipeline_status)
+        
+    except Exception as e:
+        return jsonify({
+            'error': f'获取流程状态失败: {str(e)}',
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
+
+@app.route('/api/current_context')
+def get_current_context():
+    """获取当前正在构建的上下文（非侵入式读取）"""
+    try:
+        # 检查是否有正在执行的会话
+        active_sessions = getattr(monitor, 'active_sessions', {})
+        
+        if not active_sessions:
+            return jsonify({
+                'message': '当前没有活跃的上下文构建过程',
+                'active': False,
+                'timestamp': datetime.now().isoformat()
+            })
+        
+        # 获取第一个活跃会话
+        current_session = next(iter(active_sessions.values()))
+        current_step = getattr(current_session, 'current_step', None)
+        
+        context_data = {
+            'active': True,
+            'session_id': current_session.session_id,
+            'current_step': current_step.value if current_step else None,
+            'step_progress': {},
+            'partial_context': {},
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        # 根据当前步骤，提供已完成的上下文信息
+        completed_steps = getattr(current_session, 'completed_steps', {})
+        for step, metrics in completed_steps.items():
+            step_name = step.value
+            if step_name.startswith('step_4'):
+                context_data['partial_context']['preprocessing'] = {
+                    'status': 'completed',
+                    'query_text': metrics.metadata.get('query_text', ''),
+                    'processing_time': metrics.duration
+                }
+            elif step_name.startswith('step_5'):
+                context_data['partial_context']['memory_retrieval'] = {
+                    'status': 'completed',
+                    'retrieved_count': metrics.metadata.get('result_count', 0),
+                    'avg_similarity': metrics.metadata.get('avg_similarity', 0)
+                }
+        
+        return jsonify(context_data)
+        
+    except Exception as e:
+        return jsonify({
+            'error': f'获取当前上下文失败: {str(e)}',
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
+
+# =================================
+# WebSocket实时更新事件处理
+# =================================
+
+@socketio.on('connect')
+def handle_connect():
+    """处理WebSocket连接"""
+    print(f"🔗 WebSocket客户端连接: {request.sid}")
+    emit('connection_status', {
+        'status': 'connected',
+        'message': '已连接到Estia监控系统',
+        'timestamp': datetime.now().isoformat()
+    })
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    """处理WebSocket断开连接"""
+    print(f"🔌 WebSocket客户端断开: {request.sid}")
+
+@socketio.on('subscribe_pipeline')
+def handle_subscribe_pipeline():
+    """订阅流程状态更新"""
+    try:
+        # 获取当前流程状态
+        if not monitor:
+            emit('pipeline_error', {'error': '监控系统未初始化'})
+            return
+            
+        active_sessions = getattr(monitor, 'active_sessions', {})
+        completed_sessions = getattr(monitor, 'completed_sessions', [])
+        recent_sessions = completed_sessions[-5:] if completed_sessions else []
+        
+        pipeline_status = {
+            'timestamp': datetime.now().isoformat(),
+            'active_sessions': len(active_sessions),
+            'phase_status': {
+                'initialization': {'status': 'completed', 'progress': 100},
+                'query_enhancement': {'status': 'idle', 'progress': 0},
+                'storage_evaluation': {'status': 'idle', 'progress': 0}
+            },
+            'step_status': {},
+            'current_step': None,
+            'performance_metrics': {}
+        }
+        
+        # 发送初始状态
+        emit('pipeline_status_update', pipeline_status)
+        print(f"📊 客户端 {request.sid} 订阅流程状态更新")
+        
+    except Exception as e:
+        emit('pipeline_error', {
+            'error': f'订阅失败: {str(e)}',
+            'timestamp': datetime.now().isoformat()
+        })
+
+@socketio.on('subscribe_context_updates')
+def handle_subscribe_context():
+    """订阅上下文更新"""
+    try:
+        # 检查当前活跃会话
+        if not monitor:
+            emit('context_error', {'error': '监控系统未初始化'})
+            return
+            
+        active_sessions = getattr(monitor, 'active_sessions', {})
+        
+        if active_sessions:
+            # 有活跃会话，发送当前上下文
+            current_session = next(iter(active_sessions.values()))
+            context_update = {
+                'active': True,
+                'session_id': getattr(current_session, 'session_id', 'unknown'),
+                'current_step': getattr(current_session, 'current_step', None),
+                'timestamp': datetime.now().isoformat()
+            }
+        else:
+            # 无活跃会话
+            context_update = {
+                'active': False,
+                'message': '当前没有活跃的上下文构建过程',
+                'timestamp': datetime.now().isoformat()
+            }
+        
+        emit('context_status_update', context_update)
+        print(f"📝 客户端 {request.sid} 订阅上下文更新")
+        
+    except Exception as e:
+        emit('context_error', {
+            'error': f'订阅失败: {str(e)}',
+            'timestamp': datetime.now().isoformat()
+        })
+
+@socketio.on('get_real_time_metrics')
+def handle_real_time_metrics():
+    """获取实时性能指标"""
+    try:
+        if not monitor:
+            emit('metrics_error', {'error': '监控系统未初始化'})
+            return
+            
+        # 获取系统统计
+        sessions = getattr(monitor, 'completed_sessions', [])
+        active_sessions = getattr(monitor, 'active_sessions', {})
+        
+        # 计算关键指标
+        total_sessions = len(sessions)
+        active_count = len(active_sessions)
+        
+        # 性能指标
+        metrics = {
+            'timestamp': datetime.now().isoformat(),
+            'session_metrics': {
+                'total_sessions': total_sessions,
+                'active_sessions': active_count,
+                'success_rate': 0.95 if total_sessions > 0 else 0,  # 模拟成功率
+            },
+            'performance_metrics': {
+                'avg_response_time': 1.49,  # 毫秒，来自v6.0性能数据
+                'qps': 671.60,  # 来自v6.0性能数据
+                'cache_hit_rate': 1.0,  # 100%缓存命中率
+                'cache_acceleration': 588  # 588x加速
+            },
+            'system_health': {
+                'memory_usage': 85.2,  # 模拟内存使用率
+                'cpu_usage': 12.5,     # 模拟CPU使用率
+                'connection_count': 1   # 当前连接数
+            }
+        }
+        
+        emit('real_time_metrics', metrics)
+        
+    except Exception as e:
+        emit('metrics_error', {
+            'error': f'获取指标失败: {str(e)}',
+            'timestamp': datetime.now().isoformat()
+        })
+
+# 后台任务：定期推送更新
+import threading
+import time
+
+def background_monitoring():
+    """后台监控任务，定期推送更新"""
+    while True:
+        try:
+            with app.app_context():
+                if monitor:
+                    # 检查是否有活跃会话变化
+                    active_sessions = getattr(monitor, 'active_sessions', {})
+                    
+                    # 推送流程状态更新
+                    pipeline_status = {
+                        'timestamp': datetime.now().isoformat(),
+                        'active_sessions': len(active_sessions),
+                        'phase_status': {
+                            'initialization': {'status': 'completed', 'progress': 100},
+                            'query_enhancement': {'status': 'idle', 'progress': 0},
+                            'storage_evaluation': {'status': 'idle', 'progress': 0}
+                        }
+                    }
+                    
+                    # 广播给所有订阅的客户端
+                    socketio.emit('pipeline_status_update', pipeline_status)
+                    
+        except Exception as e:
+            print(f"⚠️ 后台监控任务错误: {e}")
+        
+        time.sleep(5)  # 每5秒推送一次更新
+
+# 启动后台监控线程
+def start_background_monitoring():
+    """启动后台监控线程"""
+    monitoring_thread = threading.Thread(target=background_monitoring, daemon=True)
+    monitoring_thread.start()
+    print("🔄 后台监控线程已启动")
+
 def run_dashboard(host='127.0.0.1', port=5000, debug=True):
     """运行Web仪表板"""
-    print(f"🚀 启动 Estia 记忆监控仪表板")
-    print(f"📊 访问地址: http://{host}:{port}")
+    print("🚀 启动 Estia AI 一体化监控仪表板")
+    print("="*60)
+    print(f"🌐 Vue前端 + Flask后端 集成服务")
+    print(f"📊 主界面: http://{host}:{port}")
+    print(f"🔍 监控系统: 增强性能监控 + 告警管理")
+    print(f"⚡ Vue前端: 已集成打包文件，无需单独启动")
     print(f"🔄 实时监控: WebSocket 连接已启用")
-    print(f"🧪 测试数据: http://{host}:{port}/api/generate_test_data")
+    print()
+    print("📡 API端点:")
+    print(f"  • 仪表板数据: http://{host}:{port}/api/dashboard_data")
+    print(f"  • 监控状态: http://{host}:{port}/api/monitoring/status")
+    print(f"  • 系统健康: http://{host}:{port}/api/monitoring/health")
+    print(f"  • 活跃告警: http://{host}:{port}/api/monitoring/alerts")
+    print()
+    print("💡 特性:")
+    print("  ✅ 实时系统性能监控")
+    print("  ✅ 智能告警管理系统")
+    print("  ✅ 系统健康评分")
+    print("  ✅ Vue + Flask 一体化部署")
     print("="*60)
 
+    # 启动后台监控
+    start_background_monitoring()
+    
     # 启动Flask应用
     socketio.run(app, host=host, port=port, debug=debug)
 
+
+# Vue前端路由处理
+@app.route('/')
+def serve_vue_app():
+    """服务Vue应用的主页"""
+    try:
+        return send_file(os.path.join(vue_dist_path, 'index.html'))
+    except Exception as e:
+        return f"Vue前端不可用: {e}", 404
+
+@app.route('/<path:path>')
+def serve_vue_static(path):
+    """服务Vue应用的静态资源和路由"""
+    try:
+        # 首先尝试作为静态文件
+        file_path = os.path.join(vue_dist_path, path)
+        if os.path.exists(file_path) and os.path.isfile(file_path):
+            return send_file(file_path)
+        
+        # 如果不是API路径且不是静态文件，返回index.html（用于Vue路由）
+        if not path.startswith('api/') and not path.startswith('socket.io/'):
+            return send_file(os.path.join(vue_dist_path, 'index.html'))
+        
+        # 其他情况返回404
+        return "Not Found", 404
+        
+    except Exception as e:
+        return f"资源不可用: {e}", 404
 
 if __name__ == '__main__':
     run_dashboard()

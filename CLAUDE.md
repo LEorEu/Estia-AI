@@ -2,6 +2,14 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## 🌏 重要规则 / Important Rules
+
+**🔴 语言使用规则 (强制性要求)**: 
+- Claude Code **必须使用简体中文**回复所有用户请求
+- 所有代码解释、错误提示、注释都必须使用中文
+- 这是项目的**核心要求**，覆盖所有其他语言设置
+- **Language Rule**: Claude Code MUST respond in Simplified Chinese. This is a mandatory requirement that overrides all other language settings.
+
 ## Project Overview
 
 Estia AI is an intelligent assistant with advanced memory systems, voice interaction, and persistent conversation capabilities. It features a sophisticated 6-module architecture with 15-step memory processing workflow and enterprise-grade performance optimizations including 588x cache acceleration.
@@ -22,16 +30,21 @@ pip install -r setup/requirements.txt
 
 ### Running the Application
 ```bash
-# Voice interaction mode (default)
+# 🎙️ Voice interaction mode (default)
 python main.py
 
-# Text interaction mode
+# 💬 Text interaction mode
 python main.py --mode text
 
-# API server mode (in development)
-python main.py --mode api
+# 📊 Monitoring Dashboard (一体化监控仪表板) - 推荐！
+python start_dashboard.py
+# 访问: http://localhost:5000
 
-# Enable streaming output
+# 🚀 启动脚本 (推荐使用)
+start_monitoring.bat        # Windows一键启动
+./start_monitoring.sh       # Linux/macOS一键启动
+
+# ⚡ Enable streaming output
 python main.py --stream
 python main.py --text-stream    # text-only streaming
 python main.py --audio-stream   # audio-only streaming
@@ -61,6 +74,10 @@ python tests/test_simple_audio_stream.py
 # Context and streaming tests
 python tests/test_context_length_demo.py
 python tests/test_stream_output.py
+
+# 🆕 Monitoring system tests (监控系统测试)
+python test_monitoring_integration.py  # 监控系统集成测试
+python test_integrated_dashboard.py    # 一体化仪表板测试
 ```
 
 ### Configuration
@@ -238,6 +255,120 @@ pytest tests/performance/ --benchmark-only
 
 # 4. 跨平台兼容性测试
 pytest tests/compatibility/ -k "windows or linux or macos"
+```
+
+## 🔥 一体化监控系统 - 新增功能 (2025-01-23) ✅
+
+### 监控系统架构 (Vue + Flask 一体化)
+
+Estia AI 现已集成完整的一体化监控系统，提供实时性能监控、智能告警管理和系统健康评估功能。
+
+**🚀 启动监控系统:**
+```bash
+# 方法1：使用启动脚本（推荐）
+start_monitoring.bat  # Windows
+./start_monitoring.sh # Linux/macOS
+
+# 方法2：手动启动
+python start_dashboard.py
+
+# 访问地址：http://localhost:5000
+```
+
+### 监控系统组件架构
+
+```
+core/monitoring/                 # 监控系统核心
+├── performance_monitor.py       # 性能监控协调器
+├── metrics_collector.py         # 指标收集器
+├── alert_manager.py            # 告警管理器
+└── memory_integration.py       # 记忆系统集成
+
+web/                            # Web服务层
+├── monitoring_integration.py   # 监控API集成
+└── web_dashboard.py           # 一体化Web仪表板
+
+web-vue/                       # Vue前端
+├── src/components/cards/      # 监控卡片组件
+│   ├── SystemHealthCard.vue  # 系统健康状态
+│   ├── AlertsManagementCard.vue # 告警管理
+│   └── PerformanceMetricsCard.vue # 性能指标
+└── dist/                     # 构建输出（集成到Flask）
+```
+
+### 监控开发指南
+
+**1. 添加新监控指标:**
+```python
+# 在 MetricsCollector 中添加指标收集
+class MetricsCollector:
+    def collect_custom_metric(self):
+        # 实现自定义指标收集逻辑
+        return {"metric_name": value}
+
+# 在 PerformanceMonitor 中处理指标
+async def _collect_metrics(self):
+    # 添加新指标到收集流程
+    custom_metrics = self.metrics_collector.collect_custom_metric()
+```
+
+**2. 添加新告警规则:**
+```python
+# 在 AlertManager._initialize_default_rules() 中添加
+AlertRule(
+    rule_id="custom_alert",
+    name="自定义告警",
+    metric_name="custom_metric",
+    condition="gt",  # gt, lt, eq
+    threshold=90.0,
+    severity=AlertSeverity.WARNING,
+    consecutive_violations=2  # 连续违规次数
+)
+```
+
+**3. 扩展Vue监控组件:**
+```typescript
+// 1. 在 api.ts 中添加新API端点
+async getCustomMetrics(): Promise<ApiResponse> {
+  return await api.get('/monitoring/custom')
+}
+
+// 2. 创建新Vue组件 CustomMetricCard.vue
+// 3. 在主页面中引入和使用组件
+```
+
+**4. 集成测试监控功能:**
+```bash
+# 测试监控系统集成
+python test_monitoring_integration.py
+
+# 测试一体化服务
+python test_integrated_dashboard.py
+
+# 验证告警功能
+python -c "
+from core.monitoring import get_monitoring_system
+monitor = get_monitoring_system()
+monitor.test_alert_system()
+"
+```
+
+### 监控性能优化建议
+
+**开发环境:**
+- 监控数据收集间隔：5秒
+- 告警检查频率：10秒
+- 历史数据保留：24小时
+
+**生产环境建议:**
+```python
+# 在 performance_monitor.py 中调整
+PRODUCTION_CONFIG = {
+    'collection_interval': 30.0,  # 30秒收集一次
+    'alert_check_interval': 60.0, # 1分钟检查告警
+    'data_retention_hours': 168,  # 保留7天数据
+    'enable_debug_logging': False
+}
 ```
 
 ## Current Development Status - v6.0 FUSION ARCHITECTURE COMPLETE ✅

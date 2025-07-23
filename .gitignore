@@ -101,3 +101,4 @@ development_plan/
 
 .claude/
 test_result/
+node_modules/
