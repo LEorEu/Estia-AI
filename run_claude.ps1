@@ -35,7 +35,7 @@ if (Test-Path $envConfigFile) {
 
 # ---------- 5. 安全地更新 .claude.json ----------
 if ($env:ANTHROPIC_API_KEY -and $env:ANTHROPIC_API_KEY -ne "sk-ant-oat01-YOUR-TOKEN-HERE") {
-    $configFile = "C:\Users\asus\.claude.json"  # 根据你的用户名调整
+    $configFile = "C:\Users\zero_\.claude.json"  # 根据你的用户名调整
     $keySnippet = $env:ANTHROPIC_API_KEY.Substring($env:ANTHROPIC_API_KEY.Length - 20)
     
     $jsonContent = if (Test-Path $configFile) { Get-Content $configFile -Raw -Encoding UTF8 } else { "null" }

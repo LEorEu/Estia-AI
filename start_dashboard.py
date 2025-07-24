@@ -67,12 +67,21 @@ def main():
         app, socketio = create_unified_dashboard(monitoring_system, config)
         print("✅ Web仪表板创建成功")
         
+        # 🔧 启动实时数据推送器
+        print("⚡ 启动实时数据推送器...")
+        from monitoring.web.realtime_pusher import create_realtime_pusher
+        
+        pusher = create_realtime_pusher(socketio, monitoring_system, push_interval=2.0)
+        pusher.start()
+        print("✅ 实时数据推送器已启动")
+        
         print("\n" + "="*60)
         print("🎉 Estia AI 重构版监控系统已就绪！")
         print("="*60)
         print(f"🌐 主页面: http://{config.web.host}:{config.web.port}")
         print(f"📊 API接口: http://{config.web.host}:{config.web.port}/api/monitoring/")
-        print("⚡ 实时监控: WebSocket已启用")
+        print("⚡ 实时监控: WebSocket已启用，推送间隔2秒")
+        print("🔗 数据桥接: 已连接主程序监控数据")
         print("🛑 按 Ctrl+C 停止系统")
         print("="*60)
         
@@ -98,6 +107,13 @@ def main():
         return 1
     finally:
         # 确保监控系统正确停止
+        try:
+            if 'pusher' in locals():
+                pusher.stop()
+                print("✅ 实时推送器已停止")
+        except:
+            pass
+            
         try:
             if 'monitoring_system' in locals():
                 monitoring_system.stop()

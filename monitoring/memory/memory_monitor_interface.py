@@ -29,24 +29,25 @@ class MemoryMonitorInterface:
     def _initialize_safely(self):
         """安全地初始化记忆系统监控"""
         try:
-            # monitor_flow 已弃用，功能迁移到统一监控系统
-            # 尝试直接从记忆系统获取统计信息
-            from core.memory import create_estia_memory
+            # 🔧 使用监控桥接器获取真实数据，而不是创建独立的记忆系统实例
+            from core.monitoring_bridge import get_monitoring_bridge
             
-            # 创建记忆系统实例来获取统计
-            self.memory_system = create_estia_memory(enable_advanced=True)
-            logger.info("✅ 记忆系统监控接口已连接到主记忆系统")
+            self.monitoring_bridge = get_monitoring_bridge()
+            self.memory_system = None  # 不再创建独立实例
+            logger.info("✅ 记忆系统监控接口已连接到监控桥接器")
             
         except ImportError as e:
-            logger.warning(f"记忆系统连接失败: {e}")
+            logger.warning(f"监控桥接器连接失败: {e}")
+            self.monitoring_bridge = None
             self.memory_system = None
         except Exception as e:
             logger.error(f"记忆系统监控接口初始化失败: {e}")
+            self.monitoring_bridge = None
             self.memory_system = None
     
     def is_available(self) -> bool:
         """检查记忆系统监控是否可用"""
-        return self.memory_system is not None
+        return self.monitoring_bridge is not None and self.monitoring_bridge.is_main_program_running()
     
     def get_comprehensive_stats(self) -> Dict[str, Any]:
         """
@@ -55,14 +56,26 @@ class MemoryMonitorInterface:
         Returns:
             Dict: 统计信息，如果不可用则返回错误信息
         """
-        if not self.is_available():
+        if not self.monitoring_bridge:
             return {
-                'error': '记忆系统监控不可用',
+                'error': '监控桥接器不可用',
                 'available': False
             }
         
         try:
-            return self.memory_system.get_system_stats()
+            # 🔧 从监控桥接器获取真实数据
+            monitoring_data = self.monitoring_bridge.get_monitoring_data()
+            
+            # 转换为记忆系统统计格式
+            return {
+                'total_queries': monitoring_data['performance_metrics']['total_queries'],
+                'cache_hit_rate': monitoring_data['performance_metrics']['cache_hit_rate'] / 100,
+                'avg_response_time': monitoring_data['performance_metrics']['avg_response_time_ms'] / 1000,
+                'current_session': monitoring_data['system_status']['current_session'],
+                'system_running': monitoring_data['system_status']['running'],
+                'uptime_seconds': monitoring_data['system_status']['uptime_seconds'],
+                'available': True
+            }
         except Exception as e:
             logger.error(f"获取记忆系统统计失败: {e}")
             return {
@@ -108,21 +121,27 @@ class MemoryMonitorInterface:
         Returns:
             Dict: 实时指标
         """
-        if not self.is_available():
+        if not self.monitoring_bridge:
             return {
-                'error': '记忆系统监控不可用',
+                'error': '监控桥接器不可用',
                 'available': False
             }
         
         try:
-            # 从记忆系统获取实时指标
-            stats = self.memory_system.get_system_stats()
+            # 🔧 从监控桥接器获取实时指标
+            monitoring_data = self.monitoring_bridge.get_monitoring_data()
+            performance = monitoring_data['performance_metrics']
+            system = monitoring_data['system_status']
+            
             return {
-                'cache_hit_rate': stats.get('cache_hit_rate', 0),
-                'memory_usage': stats.get('total_queries', 0),
-                'response_time_ms': stats.get('avg_response_time', 0) * 1000,
-                'session_count': 1 if stats.get('current_session') else 0,
-                'last_update': '2025-07-24T15:53:00Z'
+                'cache_hit_rate': performance['cache_hit_rate'],
+                'memory_usage': performance['total_queries'],
+                'response_time_ms': performance['avg_response_time_ms'],
+                'session_count': 1 if system['current_session'] else 0,
+                'last_update': system['last_update'] or '2025-07-24T15:53:00Z',
+                'queries_per_second': performance['queries_per_second'],
+                'success_rate': performance['success_rate'],
+                'available': True
             }
         except Exception as e:
             logger.error(f"获取实时指标失败: {e}")

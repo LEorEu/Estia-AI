@@ -66,14 +66,29 @@ export const useMonitoringStore = defineStore('monitoring', () => {
     }
   }
   
-  const updateDashboardData = (data: DashboardData) => {
-    // 更新系统状态
-    if (data.status?.status) {
-      systemStatus.value = data.status.status
+  const updateDashboardData = (data: any) => {
+    // 修复：正确解析后端数据结构
+    // 后端返回: { data: { system_status: {...}, performance_summary: {...} } }
+    const actualData = data.data || data // 支持两种数据格式
+    
+    if (actualData.system_status) {
+      // 从system_status中提取必要的系统状态信息
+      const backendSystemStatus = actualData.system_status
+      systemStatus.value = {
+        status: backendSystemStatus.started ? 'running' : 'offline',
+        session_id: actualData.memory_system_data?.current_session || null,
+        running_time: actualData.memory_system_data?.uptime_seconds || 0,
+        progress_percentage: 0
+      }
     }
     
-    if (data.status?.summary) {
-      performanceSummary.value = data.status.summary
+    if (actualData.performance_summary) {
+      const backendPerf = actualData.performance_summary.current_metrics
+      performanceSummary.value = {
+        total_sessions: backendPerf?.active_sessions || 0,
+        average_duration: (backendPerf?.avg_query_time_ms || 0) / 1000, // 转换为秒
+        success_rate: 1 - (backendPerf?.error_rate || 0) // 1减去错误率
+      }
     }
     
     // 更新会话数据

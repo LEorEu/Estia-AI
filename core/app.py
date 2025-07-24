@@ -7,6 +7,7 @@ import time
 import traceback
 import logging
 import asyncio
+import threading
 from datetime import datetime
 import os
 
@@ -14,6 +15,7 @@ from config import settings
 from core.dialogue.engine import DialogueEngine
 from core.audio import start_keyboard_controller
 from core.memory import create_memory_system
+from core.monitoring_bridge import get_monitoring_bridge
 
 # 设置日志
 logger = logging.getLogger("estia.app")
@@ -33,6 +35,11 @@ class EstiaApp:
         # 🔧 添加session管理
         self.current_session_id = None
         self.session_context = None
+        
+        # 🔧 监控桥接器
+        self.monitoring_bridge = get_monitoring_bridge()
+        self._heartbeat_thread = None
+        self._heartbeat_running = False
         
         # 启动时预加载所有组件
         self._initialize_system()
@@ -132,6 +139,21 @@ class EstiaApp:
             # 完成初始化
             total_time = time.time() - start_time
             self.is_initialized = True
+            
+            # 🔧 更新监控系统状态
+            self.monitoring_bridge.update_system_status(running=True)
+            
+            # 🔧 更新记忆系统统计信息
+            if self.memory:
+                try:
+                    memory_stats = self.memory.get_system_stats()
+                    self.monitoring_bridge.update_memory_stats(memory_stats)
+                    self.logger.debug("监控桥接器已更新记忆系统统计")
+                except Exception as e:
+                    self.logger.warning(f"更新监控统计失败: {e}")
+            
+            # 🔧 启动监控心跳线程
+            self._start_monitoring_heartbeat()
             
             if self.show_progress:
                 print("="*60)
@@ -263,8 +285,37 @@ class EstiaApp:
             except Exception as e:
                 self.logger.warning(f"存储对话记录失败: {e}")
             
+            # 🔧 更新监控数据
+            total_time = time.time() - start_time
+            try:
+                session_id = context.get('session_id') if context else None
+                self.monitoring_bridge.update_system_status(running=True, session_id=session_id)
+                self.monitoring_bridge.update_performance_metrics(
+                    response_time=total_time, 
+                    success=True,
+                    cache_hit=True  # 假设缓存命中，实际可以从记忆系统获取
+                )
+                self.monitoring_bridge.add_session_record(
+                    user_input=query,
+                    ai_response=full_response,
+                    response_time=total_time,
+                    session_id=session_id
+                )
+                self.logger.debug(f"监控数据已更新，响应时间: {total_time:.3f}s")
+            except Exception as e:
+                self.logger.warning(f"更新监控数据失败: {e}")
+            
         except Exception as e:
             self.logger.error(f"流式处理查询失败: {e}")
+            # 🔧 记录失败的查询
+            total_time = time.time() - start_time
+            try:
+                self.monitoring_bridge.update_performance_metrics(
+                    response_time=total_time, 
+                    success=False
+                )
+            except:
+                pass
             yield f"抱歉，处理您的请求时出现错误: {str(e)}"
     
     def _process_text_stream(self, query, enhanced_context):
@@ -434,6 +485,50 @@ class EstiaApp:
             import traceback
             self.logger.error(traceback.format_exc())
             return "抱歉，我遇到了一些问题，请稍后再试。"
+    
+    def _start_monitoring_heartbeat(self):
+        """启动监控心跳线程"""
+        if self._heartbeat_running:
+            return
+            
+        self._heartbeat_running = True
+        self._heartbeat_thread = threading.Thread(target=self._heartbeat_loop, daemon=True)
+        self._heartbeat_thread.start()
+        self.logger.debug("监控心跳线程已启动")
+    
+    def _heartbeat_loop(self):
+        """监控心跳循环"""
+        while self._heartbeat_running and self.is_initialized:
+            try:
+                # 每15秒更新一次系统状态，保持监控数据新鲜
+                current_session = getattr(self, 'current_session_id', None)
+                self.monitoring_bridge.update_system_status(
+                    running=True, 
+                    session_id=current_session
+                )
+                
+                # 更新记忆系统统计
+                if self.memory:
+                    try:
+                        memory_stats = self.memory.get_system_stats()
+                        self.monitoring_bridge.update_memory_stats(memory_stats)
+                    except Exception as e:
+                        self.logger.debug(f"心跳更新记忆统计失败: {e}")
+                
+                self.logger.debug("监控心跳更新完成")
+                
+            except Exception as e:
+                self.logger.warning(f"监控心跳更新失败: {e}")
+            
+            # 每15秒心跳一次
+            time.sleep(15)
+    
+    def _stop_monitoring_heartbeat(self):
+        """停止监控心跳线程"""
+        self._heartbeat_running = False
+        if self._heartbeat_thread:
+            self._heartbeat_thread.join(timeout=2)
+            self.logger.debug("监控心跳线程已停止")
     
     def start_voice_interaction(self):
         """启动语音交互模式"""
@@ -641,6 +736,14 @@ class EstiaApp:
         except Exception as e:
             self.logger.error(f"交互模式启动失败: {e}")
             print(f"❌ 启动失败: {e}")
+        finally:
+            # 🔧 清理监控心跳线程
+            self._stop_monitoring_heartbeat()
+            # 🔧 更新监控状态为停止
+            try:
+                self.monitoring_bridge.update_system_status(running=False)
+            except:
+                pass
     
     def get_system_stats(self):
         """获取系统状态统计"""
