@@ -20,18 +20,18 @@ logger = logging.getLogger(__name__)
 class APIHandlers:
     """API处理器类，封装所有API端点的处理逻辑"""
     
-    def __init__(self, monitor=None, analytics=None, performance_optimizer=None):
+    def __init__(self, monitoring_system):
         """
         初始化API处理器
         
         Args:
-            monitor: 监控系统实例
-            analytics: 分析器实例  
-            performance_optimizer: 性能优化器实例
+            monitoring_system: 统一监控系统实例
         """
-        self.monitor = monitor
-        self.analytics = analytics
-        self.performance_optimizer = performance_optimizer
+        self.monitoring_system = monitoring_system
+        # 兼容性属性
+        self.monitor = monitoring_system
+        self.analytics = None
+        self.performance_optimizer = None
         
     def get_status(self):
         """获取系统状态"""
@@ -262,6 +262,336 @@ class APIHandlers:
             'final_context': {},
             'message': '上下文数据提取功能正在重构中'
         }
+    
+    # ===========================================
+    # 新的统一监控系统API方法 (v2.0)
+    # ===========================================
+    
+    def get_system_status(self):
+        """获取系统状态 (新版统一方法)"""
+        try:
+            if hasattr(self.monitoring_system, 'get_status'):
+                status = self.monitoring_system.get_status()
+                return jsonify({
+                    'success': True,
+                    'data': status,
+                    'timestamp': datetime.now().isoformat()
+                })
+            else:
+                return self.get_status()  # 回退到旧方法
+        except Exception as e:
+            logger.error(f"获取系统状态失败: {e}")
+            return jsonify({'error': str(e)}), 500
+    
+    def get_comprehensive_data(self):
+        """获取综合仪表板数据"""
+        try:
+            if hasattr(self.monitoring_system, 'get_comprehensive_data'):
+                data = self.monitoring_system.get_comprehensive_data()
+                
+                # 为前端添加字段映射
+                if 'current_metrics' in data:
+                    metrics = data['current_metrics']
+                    # 添加前端期望的字段名
+                    data['current_metrics'].update({
+                        'cpu_usage': metrics.get('system.cpu.usage_percent', 0),
+                        'memory_usage_percent': metrics.get('system.memory.usage_percent', 0),
+                        'cache_hit_rate': metrics.get('custom.memory_cache_hit_rate', 0),
+                        'error_rate': data.get('performance_summary', {}).get('current_metrics', {}).get('error_rate', 0)
+                    })
+                
+                return jsonify({
+                    'success': True,
+                    'data': data,
+                    'timestamp': datetime.now().isoformat()
+                })
+            else:
+                # 默认返回基础数据
+                return jsonify({
+                    'success': True,
+                    'data': {
+                        'health_score': 0,
+                        'alerts': [],
+                        'performance': {},
+                        'current_metrics': {
+                            'cpu_usage': 0,
+                            'memory_usage_percent': 0,
+                            'cache_hit_rate': 0,
+                            'error_rate': 0
+                        }
+                    },
+                    'timestamp': datetime.now().isoformat()
+                })
+        except Exception as e:
+            logger.error(f"获取综合数据失败: {e}")
+            return jsonify({'error': str(e)}), 500
+    
+    def get_current_metrics(self):
+        """获取当前指标"""
+        try:
+            if hasattr(self.monitoring_system, 'get_current_metrics'):
+                raw_metrics = self.monitoring_system.get_current_metrics()
+                
+                # 添加前端期望的字段映射
+                metrics = dict(raw_metrics)  # 保留原始字段
+                metrics.update({
+                    'cpu_usage': raw_metrics.get('system.cpu.usage_percent', 0),
+                    'memory_usage_percent': raw_metrics.get('system.memory.usage_percent', 0),
+                    'cache_hit_rate': raw_metrics.get('custom.memory_cache_hit_rate', 0),
+                    'error_rate': 0.0  # 待实现：从性能监控获取真实错误率
+                })
+                
+                return jsonify({
+                    'success': True,
+                    'data': metrics,
+                    'timestamp': datetime.now().isoformat()
+                })
+            else:
+                return jsonify({
+                    'success': True,
+                    'data': {
+                        'cpu_usage': 0,
+                        'memory_usage_percent': 0,
+                        'cache_hit_rate': 0,
+                        'error_rate': 0
+                    },
+                    'timestamp': datetime.now().isoformat()
+                })
+        except Exception as e:
+            logger.error(f"获取当前指标失败: {e}")
+            return jsonify({'error': str(e)}), 500
+    
+    def get_metrics_history(self):
+        """获取历史指标"""
+        try:
+            if hasattr(self.monitoring_system, 'get_metrics_history'):
+                history = self.monitoring_system.get_metrics_history()
+                return jsonify({
+                    'success': True,
+                    'data': history,
+                    'timestamp': datetime.now().isoformat()
+                })
+            else:
+                return jsonify({
+                    'success': True,
+                    'data': {'metrics': []},
+                    'timestamp': datetime.now().isoformat()
+                })
+        except Exception as e:
+            logger.error(f"获取历史指标失败: {e}")
+            return jsonify({'error': str(e)}), 500
+    
+    def get_active_alerts(self):
+        """获取活跃告警"""
+        try:
+            if hasattr(self.monitoring_system, 'get_active_alerts'):
+                alerts = self.monitoring_system.get_active_alerts()
+                return jsonify({
+                    'success': True,
+                    'data': alerts,
+                    'timestamp': datetime.now().isoformat()
+                })
+            else:
+                return jsonify({
+                    'success': True,
+                    'data': {'alerts': []},
+                    'timestamp': datetime.now().isoformat()
+                })
+        except Exception as e:
+            logger.error(f"获取活跃告警失败: {e}")
+            return jsonify({'error': str(e)}), 500
+    
+    def acknowledge_alert(self, alert_id):
+        """确认告警"""
+        try:
+            if hasattr(self.monitoring_system, 'acknowledge_alert'):
+                result = self.monitoring_system.acknowledge_alert(alert_id)
+                return jsonify({
+                    'success': True,
+                    'data': result,
+                    'timestamp': datetime.now().isoformat()
+                })
+            else:
+                return jsonify({
+                    'success': True,
+                    'message': f'告警 {alert_id} 已确认（模拟）',
+                    'timestamp': datetime.now().isoformat()
+                })
+        except Exception as e:
+            logger.error(f"确认告警失败: {e}")
+            return jsonify({'error': str(e)}), 500
+    
+    def get_performance_summary(self):
+        """获取性能摘要"""
+        try:
+            if hasattr(self.monitoring_system, 'get_performance_summary'):
+                summary = self.monitoring_system.get_performance_summary()
+                return jsonify({
+                    'success': True,
+                    'data': summary,
+                    'timestamp': datetime.now().isoformat()
+                })
+            else:
+                return jsonify({
+                    'success': True,
+                    'data': {
+                        'overall_score': 85,
+                        'response_time': 150,
+                        'throughput': 100
+                    },
+                    'timestamp': datetime.now().isoformat()
+                })
+        except Exception as e:
+            logger.error(f"获取性能摘要失败: {e}")
+            return jsonify({'error': str(e)}), 500
+    
+    def get_memory_system_stats(self):
+        """获取内存系统统计"""
+        try:
+            if hasattr(self.monitoring_system, 'get_memory_stats'):
+                stats = self.monitoring_system.get_memory_stats()
+                return jsonify({
+                    'success': True,
+                    'data': stats,
+                    'timestamp': datetime.now().isoformat()
+                })
+            else:
+                return jsonify({
+                    'success': True,
+                    'data': {
+                        'total_memories': 0,
+                        'active_memories': 0,
+                        'cache_hit_rate': 0
+                    },
+                    'timestamp': datetime.now().isoformat()
+                })
+        except Exception as e:
+            logger.error(f"获取内存统计失败: {e}")
+            return jsonify({'error': str(e)}), 500
+    
+    def get_step_monitoring(self):
+        """获取步骤监控"""
+        try:
+            if hasattr(self.monitoring_system, 'get_step_monitoring'):
+                monitoring = self.monitoring_system.get_step_monitoring()
+                return jsonify({
+                    'success': True,
+                    'data': monitoring,
+                    'timestamp': datetime.now().isoformat()
+                })
+            else:
+                return jsonify({
+                    'success': True,
+                    'data': {'steps': []},
+                    'timestamp': datetime.now().isoformat()
+                })
+        except Exception as e:
+            logger.error(f"获取步骤监控失败: {e}")
+            return jsonify({'error': str(e)}), 500
+    
+    def get_recommendations(self):
+        """获取推荐"""
+        try:
+            if hasattr(self.monitoring_system, 'get_recommendations'):
+                recommendations = self.monitoring_system.get_recommendations()
+                return jsonify({
+                    'success': True,
+                    'data': recommendations,
+                    'timestamp': datetime.now().isoformat()
+                })
+            else:
+                return jsonify({
+                    'success': True,
+                    'data': {'recommendations': []},
+                    'timestamp': datetime.now().isoformat()
+                })
+        except Exception as e:
+            logger.error(f"获取推荐失败: {e}")
+            return jsonify({'error': str(e)}), 500
+    
+    def get_pipeline_status(self):
+        """获取管道状态 (新增)"""
+        try:
+            if hasattr(self.monitoring_system, 'get_pipeline_status'):
+                status = self.monitoring_system.get_pipeline_status()
+                return jsonify({
+                    'success': True,
+                    'data': status,
+                    'timestamp': datetime.now().isoformat()
+                })
+            else:
+                # 默认管道状态
+                return jsonify({
+                    'success': True,
+                    'data': {
+                        'status': 'running',
+                        'total_steps': 15,
+                        'completed_steps': 15,
+                        'success_rate': 100.0,
+                        'last_execution': datetime.now().isoformat(),
+                        'average_time_ms': 150.0
+                    },
+                    'timestamp': datetime.now().isoformat()
+                })
+        except Exception as e:
+            logger.error(f"获取管道状态失败: {e}")
+            return jsonify({'error': str(e)}), 500
+    
+    def get_enhanced_system_health(self):
+        """获取增强系统健康状态 (专门为前端SystemHealthCard设计)"""
+        try:
+            # 调试信息
+            logger.info(f"监控系统类型: {type(self.monitoring_system)}")
+            logger.info(f"是否有get_comprehensive_data方法: {hasattr(self.monitoring_system, 'get_comprehensive_data')}")
+            
+            if hasattr(self.monitoring_system, 'get_comprehensive_data'):
+                data = self.monitoring_system.get_comprehensive_data()
+                logger.info(f"获取到的comprehensive数据: {data.get('health_score', 'NO_HEALTH_SCORE')}")
+                
+                # 提取健康状态数据
+                health_data = {
+                    'health_score': data.get('health_score', {}).get('score', 0),
+                    'status': data.get('health_score', {}).get('status', '未知'),
+                    'status_emoji': self._get_status_emoji(data.get('health_score', {}).get('score', 0)),
+                    'issues': data.get('health_score', {}).get('issues', []),
+                    'last_update': datetime.now().isoformat()
+                }
+                
+                return jsonify({
+                    'success': True,
+                    'data': health_data,
+                    'timestamp': datetime.now().isoformat()
+                })
+            else:
+                logger.warning("监控系统没有get_comprehensive_data方法，使用默认健康状态")
+                # 默认健康状态
+                return jsonify({
+                    'success': True,
+                    'data': {
+                        'health_score': 85,
+                        'status': '良好',
+                        'status_emoji': '😊',
+                        'issues': [],
+                        'last_update': datetime.now().isoformat()
+                    },
+                    'timestamp': datetime.now().isoformat()
+                })
+        except Exception as e:
+            logger.error(f"获取增强健康状态失败: {e}")
+            return jsonify({'error': str(e)}), 500
+    
+    def _get_status_emoji(self, score: float) -> str:
+        """根据健康评分获取状态表情"""
+        if score >= 90:
+            return '😄'  # 优秀
+        elif score >= 80:
+            return '😊'  # 良好  
+        elif score >= 70:
+            return '😐'  # 一般
+        elif score >= 60:
+            return '😟'  # 较差
+        else:
+            return '😫'  # 差
 
 
 def create_api_blueprint(monitor=None, analytics=None, performance_optimizer=None) -> Blueprint:

@@ -102,3 +102,12 @@ development_plan/
 .claude/
 test_result/
 node_modules/
+test_*_temp.py
+migration_*_temp.md
+backup_*_temp/
+cleanup_*_temp.py
+
+# 监控系统测试日志
+logs/monitoring_test_*.log
+logs/unified_*_test_*.log
+test_report_*.json

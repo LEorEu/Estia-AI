@@ -59,8 +59,9 @@ class EstiaApp:
                 if self.show_progress:
                     print("⚡ 正在初始化异步评估器...")
                 
-                # 使用稳定的启动管理器初始化
-                success = self.memory.ensure_async_initialized()
+                # 检查异步管理器和异步评估器是否已创建
+                success = (self.memory.async_flow_manager is not None and 
+                          getattr(self.memory.async_flow_manager, 'async_evaluator', None) is not None)
                 self._async_initialized = success
                 
                 if self.show_progress:
@@ -76,7 +77,8 @@ class EstiaApp:
     def ensure_fully_initialized(self):
         """确保所有组件（包括异步组件）都已初始化 - 简化为同步方法"""
         if not self._async_initialized and self.memory:
-            self._async_initialized = self.memory.ensure_async_initialized()
+            self._async_initialized = (self.memory.async_flow_manager is not None and 
+                                     getattr(self.memory.async_flow_manager, 'async_evaluator', None) is not None)
     
     def _initialize_system(self):
         """系统初始化 - 启动时预加载"""

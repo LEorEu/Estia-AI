@@ -16,7 +16,7 @@ from datetime import datetime
 from .managers.sync_flow import SyncFlowManager
 from .managers.async_flow import AsyncFlowManager
 from .managers.lifecycle import LifecycleManager
-from .managers.monitor_flow import MemoryFlowMonitor
+# from .managers.monitor_flow import MemoryFlowMonitor  # 已弃用，功能迁移到统一监控系统
 from .managers.config import ConfigManager
 from .managers.recovery import ErrorRecoveryManager
 
@@ -58,7 +58,7 @@ class EstiaMemorySystem:
         self.sync_flow_manager = None
         self.async_flow_manager = None
         self.lifecycle_manager = None
-        self.monitor_manager = None
+        self.monitor_manager = None  # 已弃用，功能迁移到统一监控系统
         self.config_manager = None
         self.recovery_manager = None
         
@@ -249,11 +249,25 @@ class EstiaMemorySystem:
             # 异步流程管理器
             self.async_flow_manager = AsyncFlowManager(components)
             
+            # 🔥 启动异步处理（如果可能的话）
+            try:
+                import asyncio
+                loop = asyncio.get_running_loop()
+                if loop.is_running():
+                    asyncio.create_task(self.async_flow_manager.start_async_processing())
+                    self.logger.info("✅ 异步处理已在运行的事件循环中启动")
+                else:
+                    self.logger.info("⏳ 异步处理将在事件循环启动后初始化")
+            except RuntimeError:
+                # 没有运行的事件循环，这在同步初始化时是正常的
+                self.logger.info("⏳ 异步处理将在需要时启动")
+            
             # 生命周期管理器
             self.lifecycle_manager = LifecycleManager(components)
             
-            # 监控流程管理器
-            self.monitor_manager = MemoryFlowMonitor(components)
+            # 监控流程管理器 - 已弃用，功能迁移到统一监控系统(/monitoring)
+            # self.monitor_manager = MemoryFlowMonitor(components)
+            self.monitor_manager = None
             
             self.logger.info("✅ 六大管理器初始化完成")
             
@@ -295,15 +309,17 @@ class EstiaMemorySystem:
                         context = {}
                     context['session_id'] = current_session
                 
-                # 🆕 监控开始
-                self.monitor_manager.start_monitoring('enhance_query')
+                # 🆕 监控开始 - 已迁移到统一监控系统
+                if self.monitor_manager:
+                    self.monitor_manager.start_monitoring('enhance_query')
                 
                 # 执行同步流程 (Step 3-8)
                 result = self.sync_flow_manager.execute_sync_flow(user_input, context)
                 enhanced_context = result.get('enhanced_context', '')
                 
-                # 🆕 监控结束
-                self.monitor_manager.end_monitoring('enhance_query')
+                # 🆕 监控结束 - 已迁移到统一监控系统
+                if self.monitor_manager:
+                    self.monitor_manager.end_monitoring('enhance_query')
                 
                 # 更新性能统计
                 processing_time = time.time() - start_time
@@ -430,8 +446,9 @@ class EstiaMemorySystem:
             'context_preset': self.context_preset
         }
         
-        if self.monitor_manager:
-            base_stats.update(self.monitor_manager.get_comprehensive_stats())
+        # 监控统计已迁移到统一监控系统(/monitoring)
+        # if self.monitor_manager:
+        #     base_stats.update(self.monitor_manager.get_comprehensive_stats())
         
         return base_stats
     
@@ -511,8 +528,9 @@ class EstiaMemorySystem:
         if self.async_flow_manager:
             await self.async_flow_manager.stop_async_processing()
         
-        if self.monitor_manager:
-            await self.monitor_manager.stop_monitoring()
+        # 监控管理器已弃用
+        # if self.monitor_manager:
+        #     await self.monitor_manager.stop_monitoring()
         
         if self.db_manager:
             self.db_manager.close()
